@@ -176,6 +176,9 @@
         <select id="pdir"><option value="ltr" selected>de la stânga la dreapta</option><option value="rtl">de la dreapta la stânga</option></select></div>
       <div class="field"><label>Text în celulă</label>
         <select id="cellmode"><option value="both" selected>Palet mare + cod complet</option><option value="code">Doar codul complet</option><option value="num">Doar numărul paletului</option></select></div>
+      <div class="field"><label>Capacitate / palet (buc)</label>
+        <input id="capacity" type="number" min="0" value="0" placeholder="0 = doar ocupat/liber">
+        <span class="hint">Colorează celulele după cât de pline sunt. 0 = dezactivat.</span></div>
     </div>
     <div class="card">
       <h2>Salvare (Excel)</h2>
@@ -197,7 +200,7 @@
   </div>
   <div>
     <p class="total noprint"><span id="tot">0</span><small>poziții de palet, din <span id="nr">0</span> rafturi · <span id="occ">0</span> ocupate</small></p>
-    <div class="legend noprint">
+    <div class="legend noprint" id="legend">
       <span><i style="background:#dcfce7;border:1px solid #4ade80"></i> ocupat</span>
       <span><i style="background:#f8fafc;border:1px solid #cbd5e1"></i> liber</span>
       <span class="tip">Click pe o celulă pentru detalii</span>
@@ -398,7 +401,8 @@ function readRacks(){
 function rackById(id){ return readRacks().find(r=>r.id===id); }
 function globals(){
   return {ldig:+$('ldig').value||2,pdig:+$('pdig').value||2,sep:$('sep').value.trim()||'-',
-    lpref:$('lpref').value,ppref:$('ppref').value,base:$('base').value,pdir:$('pdir').value,mode:$('cellmode').value};
+    lpref:$('lpref').value,ppref:$('ppref').value,base:$('base').value,pdir:$('pdir').value,mode:$('cellmode').value,
+    cap:+$('capacity').value||0};
 }
 
 // ---------- DIMENSIUNI per raft ----------
@@ -648,6 +652,16 @@ $('invExport').addEventListener('click',()=>{ try{
 }catch(e){ $('invExpStatus').textContent='Eroare.'; } });
 
 // ---------- SVG schemă locații ----------
+// Culoare celulă după cât de plină e (când g.cap > 0): gri→verde→galben→portocaliu→roșu.
+function occColors(occ,total,cap){
+  if(!occ) return {fill:'#f8fafc',stroke:'#cbd5e1'};          // gol
+  if(!cap||cap<=0) return {fill:'#dcfce7',stroke:'#4ade80'};  // ocupat (fără capacitate → verde)
+  const r=total/cap;
+  if(r<=0.34) return {fill:'#dcfce7',stroke:'#4ade80'};       // mult spațiu liber
+  if(r<=0.67) return {fill:'#fef9c3',stroke:'#eab308'};       // ~jumătate
+  if(r<0.999) return {fill:'#ffedd5',stroke:'#f97316'};       // aproape plin
+  return {fill:'#fee2e2',stroke:'#ef4444'};                    // plin
+}
 function buildSVG(r,g){
   const many = r.pallets>14 || r.levels>14;
   const cellW = many?94:140, cellH = many?58:82;
@@ -668,11 +682,13 @@ function buildSVG(r,g){
       const inv=invByCode(code), occ=inv&&inv.length;
       const total=occ?inv.reduce((a,p)=>a+(+p.cant||0),0):0;
       const sel=(code.toUpperCase()===selectedCode);
-      const fill=occ?'#dcfce7':'#f8fafc';
-      const stroke=sel?'#2563eb':(occ?'#4ade80':'#cbd5e1');
+      const col=occColors(occ,total,g.cap);
+      const fill=col.fill;
+      const stroke=sel?'#2563eb':col.stroke;
       const sw=sel?2.5:1;
       s+=`<g data-code="${esc(code)}" style="cursor:pointer">`;
-      if(occ) s+=`<title>${esc(code)} — ${esc(inv.map(p=>p.produs+' ×'+p.cant).join(', '))}</title>`;
+      if(occ){ const fillTxt=g.cap>0?` — ${total}/${g.cap} (${Math.round(total/g.cap*100)}%)`:'';
+        s+=`<title>${esc(code)}${fillTxt} — ${esc(inv.map(p=>p.produs+' ×'+p.cant).join(', '))}</title>`; }
       s+=`<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
       if(g.mode==='both'){
         s+=`<text x="${x+cellW/2}" y="${y+cellH/2+cellH*0.09}" text-anchor="middle" font-size="${Math.max(11,cellH*0.25)}" font-weight="700" fill="#0f172a">${esc(code)}</text>`;
@@ -789,8 +805,24 @@ function schemaHTML(){
   const shown=(f==='all')?rs:rs.filter(r=>r.id===f);
   return shown.map(r=>`<div class="rack-svg">${buildSVG(r,g).svg}</div>`).join('');
 }
+function renderLegend(g){
+  const lg=$('legend'); if(!lg) return;
+  const sw=(bg,bd,txt)=>`<span><i style="background:${bg};border:1px solid ${bd}"></i> ${txt}</span>`;
+  if(g.cap>0){
+    lg.innerHTML=sw('#f8fafc','#cbd5e1','gol')
+      +sw('#dcfce7','#4ade80','≤34%')
+      +sw('#fef9c3','#eab308','~50%')
+      +sw('#ffedd5','#f97316','aproape plin')
+      +sw('#fee2e2','#ef4444','plin')
+      +'<span class="tip">Culoare după cât de plin (cap. '+g.cap+' buc/palet)</span>';
+  }else{
+    lg.innerHTML=sw('#dcfce7','#4ade80','ocupat')+sw('#f8fafc','#cbd5e1','liber')
+      +'<span class="tip">Click pe o celulă pentru detalii</span>';
+  }
+}
 function refresh(){
   const g=globals(),racks=readRacks();
+  renderLegend(g);
   let tot=0;
   for(const r of racks){const c=r.levels*r.pallets;tot+=c;r.el.querySelector('.cnt').textContent=`${c} poziții`;}
   $('tot').textContent=tot.toLocaleString('ro-RO'); $('nr').textContent=racks.length;
@@ -857,7 +889,7 @@ function exportExcel(){
     const dh=['Raft','Wb','Uw','D','Bh','h0','hp','topClear','palletL','palletW','Pf','Pd','goodsH','load'];
     const dm=[dh]; racks.forEach(r=>{const d=getDims(r.id);dm.push([r.name,d.Wb,d.Uw,d.D,d.Bh,d.h0,d.hp,d.topClear,d.palletL,d.palletW,d.Pf,d.Pd,d.goodsH,d.load]);});
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(dm),'Dimensiuni');
-    const g=globals(), st=[['Cheie','Valoare'],['lpref',g.lpref],['ppref',g.ppref],['ldig',g.ldig],['pdig',g.pdig],['sep',g.sep],['base',g.base],['pdir',g.pdir],['mode',g.mode]];
+    const g=globals(), st=[['Cheie','Valoare'],['lpref',g.lpref],['ppref',g.ppref],['ldig',g.ldig],['pdig',g.pdig],['sep',g.sep],['base',g.base],['pdir',g.pdir],['mode',g.mode],['cap',g.cap]];
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(st),'Setari');
     const invRows=[['Locatie','Produs','Cantitate','Data']];
     for(const k in inventory) inventory[k].forEach(x=>invRows.push([k,x.produs,x.cant,x.data||'']));
@@ -879,7 +911,7 @@ function importExcel(file){
       if(sSheet){ const map={}; XLSX.utils.sheet_to_json(sSheet).forEach(o=>map[o.Cheie]=o.Valoare);
         const set=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
         set('lpref',map.lpref);set('ppref',map.ppref);set('ldig',map.ldig);set('pdig',map.pdig);
-        set('sep',map.sep);set('base',map.base);set('pdir',map.pdir);set('cellmode',map.mode);
+        set('sep',map.sep);set('base',map.base);set('pdir',map.pdir);set('cellmode',map.mode);set('capacity',map.cap);
       }
       $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
       const list=rows.length?rows:[['A01',4,3]];
@@ -955,7 +987,7 @@ function currentState(){ return { racks:readRacks().map(r=>({name:r.name,levels:
 function applyState(st){
   const g=st.g||{}, setv=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
   setv('lpref',g.lpref);setv('ppref',g.ppref);setv('ldig',g.ldig);setv('pdig',g.pdig);
-  setv('sep',g.sep);setv('base',g.base);setv('pdir',g.pdir);setv('cellmode',g.mode);
+  setv('sep',g.sep);setv('base',g.base);setv('pdir',g.pdir);setv('cellmode',g.mode);setv('capacity',g.cap);
   $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
   const racks=(st.racks&&st.racks.length)?st.racks:[{name:'A01',levels:4,pallets:3},{name:'A02',levels:4,pallets:3}];
   racks.forEach(r=>{ const id=addRackRaw(r.name,r.levels,r.pallets); if(r.dims) dimStore[id]={...DEF,...r.dims}; });
