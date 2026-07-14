@@ -8,6 +8,7 @@ on:
       - 'src/**'
       - 'public/**'
       - 'wrangler.toml'
+      - 'schema.sql'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -17,7 +18,17 @@ jobs:
     name: Deploy Worker
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy to Cloudflare Workers
+
+      - name: Aplica migrare D1 (schema idempotenta)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: "4"
+          command: d1 execute REPLACE_WITH_D1_NAME --remote --file=./schema.sql
+
+      - name: Deploy la Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: "4"
+          command: deploy
