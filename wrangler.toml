@@ -1,0 +1,20 @@
+# Configuratie Cloudflare Pages pentru SpotVision (schema rafturi).
+# Frontend static (schema-raft.html) + Functions in /functions (inlocuiesc server.js).
+
+name = "spotvision"
+compatibility_date = "2024-11-06"
+pages_build_output_dir = "."
+
+# --- Baza de date partajata (Cloudflare KV) ---
+# Namespace-ul KV se poate lega in DOUA feluri (alege unul):
+#
+#  A) Din dashboard Cloudflare (recomandat, nu are nevoie de ID aici):
+#     Pages -> proiectul tau -> Settings -> Functions -> KV namespace bindings
+#     Variable name: RAFT_DB   ->   namespace-ul tau
+#
+#  B) Din wrangler CLI: decomenteaza blocul de mai jos si pune ID-ul real
+#     (obtii ID-ul cu:  npx wrangler kv namespace create RAFT_DB )
+#
+# [[kv_namespaces]]
+# binding = "RAFT_DB"
+# id = "PUNE_AICI_ID-UL_NAMESPACE-ULUI_KV"
