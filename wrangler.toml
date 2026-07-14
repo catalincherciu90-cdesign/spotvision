@@ -1,0 +1,19 @@
+# Configuratie Cloudflare Worker pentru SpotVision (schema rafturi).
+# Un singur Worker (src/index.js) serveste aplicatia statica + API-ul pe D1.
+
+name = "spotvision"
+main = "src/index.js"
+compatibility_date = "2024-11-06"
+
+# Fisierele statice (schema-raft.html etc.) sunt servite prin binding-ul ASSETS.
+# .assetsignore exclude fisierele care nu trebuie publicate (cod server, docs...).
+[assets]
+directory = "."
+binding = "ASSETS"
+
+# --- Baza de date partajata (Cloudflare D1) ---
+# La deploy, acest bloc leaga automat baza de date la Worker (binding: DB).
+[[d1_databases]]
+binding = "DB"
+database_name = "spotvision"
+database_id = "5dc0f665-cc52-4536-afdb-2223cd55b4e4"
