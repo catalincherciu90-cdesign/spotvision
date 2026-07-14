@@ -1,0 +1,17 @@
+name = "spotvision"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# HTML-ul (schema-raft.html) e servit ca static asset din ./public.
+# /  si  /index.html  ->  public/index.html
+# /api/*              ->  Worker (src/index.js)
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# ⚠️ Completeaza cu D1-ul TAU (deja creat in Cloudflare).
+# Ia valorile cu:  npx wrangler d1 list
+[[d1_databases]]
+binding = "DB"
+database_name = "REPLACE_WITH_D1_NAME"
+database_id = "REPLACE_WITH_D1_ID"

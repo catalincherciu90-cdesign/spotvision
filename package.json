@@ -1,0 +1,15 @@
+{
+  "name": "spotvision",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Rafturi depozit — Cloudflare Worker + D1 (portat din server.js local)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute $npm_config_db --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
