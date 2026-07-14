@@ -176,6 +176,9 @@
         <select id="pdir"><option value="ltr" selected>de la stânga la dreapta</option><option value="rtl">de la dreapta la stânga</option></select></div>
       <div class="field"><label>Text în celulă</label>
         <select id="cellmode"><option value="both" selected>Palet mare + cod complet</option><option value="code">Doar codul complet</option><option value="num">Doar numărul paletului</option></select></div>
+      <div class="field"><label>Capacitate / palet (buc)</label>
+        <input id="capacity" type="number" min="0" value="0" placeholder="0 = doar ocupat/liber">
+        <span class="hint">Colorează celulele după cât de pline sunt. 0 = dezactivat.</span></div>
     </div>
     <div class="card">
       <h2>Salvare (Excel)</h2>
@@ -197,7 +200,7 @@
   </div>
   <div>
     <p class="total noprint"><span id="tot">0</span><small>poziții de palet, din <span id="nr">0</span> rafturi · <span id="occ">0</span> ocupate</small></p>
-    <div class="legend noprint">
+    <div class="legend noprint" id="legend">
       <span><i style="background:#dcfce7;border:1px solid #4ade80"></i> ocupat</span>
       <span><i style="background:#f8fafc;border:1px solid #cbd5e1"></i> liber</span>
       <span class="tip">Click pe o celulă pentru detalii</span>
@@ -398,7 +401,8 @@ function readRacks(){
 function rackById(id){ return readRacks().find(r=>r.id===id); }
 function globals(){
   return {ldig:+$('ldig').value||2,pdig:+$('pdig').value||2,sep:$('sep').value.trim()||'-',
-    lpref:$('lpref').value,ppref:$('ppref').value,base:$('base').value,pdir:$('pdir').value,mode:$('cellmode').value};
+    lpref:$('lpref').value,ppref:$('ppref').value,base:$('base').value,pdir:$('pdir').value,mode:$('cellmode').value,
+    cap:+$('capacity').value||0};
 }
 
 // ---------- DIMENSIUNI per raft ----------
@@ -487,12 +491,12 @@ function readInvFile(file,msgId){
     const wb=XLSX.read(e.target.result,{type:'array'});
     const sh=wb.Sheets['Inventar']||wb.Sheets['Inventory']||wb.Sheets[wb.SheetNames[0]];
     const n=loadInvRows(XLSX.utils.sheet_to_json(sh));
-    const res=applySchemaFromInventory();   // potrivește schema automat (dacă e cazul)
-    if(!res) refresh();
-    pushAllInventory();
-    $(msgId).textContent = res
-      ? `Încărcat: ${n} rânduri, ${Object.keys(inventory).length} locații — schema actualizată automat.`
-      : `Încărcat: ${n} rânduri, ${Object.keys(inventory).length} locații ocupate.`;
+    const res=applySchemaFromInventory();   // construiește/potrivește schema + normalizează codurile
+    if(!res){ refresh(); pushAllInventory(); }
+    const loc=Object.keys(inventory).length;
+    let msg=`Încărcat: ${n} rânduri, ${loc} locații — schema actualizată automat.`;
+    if(res && res.unmatched>0) msg+=` ⚠️ ${res.unmatched} locații cu cod necunoscut (nu apar pe schemă) — verifică formatul coloanei „Locatie" în Excel.`;
+    $(msgId).textContent = res ? msg : `Încărcat: ${n} rânduri, ${loc} locații ocupate.`;
   }catch(err){ $(msgId).textContent='Fișier invalid.'; } };
   rd.readAsArrayBuffer(file);
 }
@@ -506,20 +510,42 @@ $('btnInvModel').addEventListener('click',()=>{
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ex),'Inventar');
   XLSX.writeFile(wb,'model_inventar.xlsx');
 });
+// Detectează separatorul unui cod (primul care dă >=3 părți)
+function detectSep(code){ for(const s of ['-','/','.','_',' ']){ if(String(code).split(s).length>=3) return s; } return '-'; }
+// Parsează un cod de locație în {name, L, P, sep, lpref, ppref, ldig, pdig}
+// Extrage NUMĂRUL din orice token (N01→1, R04→4, 27→27), deci merge pe orice format.
+function parseLoc(code){
+  const s=String(code||'').trim().toUpperCase(); if(!s) return null;
+  const sep=detectSep(s), parts=s.split(sep);
+  if(parts.length<3) return null;
+  const lvTok=parts[parts.length-2], plTok=parts[parts.length-1];
+  const name=parts.slice(0,parts.length-2).join(sep);
+  const lm=lvTok.match(/\d+/), pm=plTok.match(/\d+/);
+  if(!name||!lm||!pm) return null;
+  const L=parseInt(lm[0],10), P=parseInt(pm[0],10);
+  if(isNaN(L)||isNaN(P)) return null;
+  return { name, L, P, sep,
+    lpref:(lvTok.match(/^\D+/)||[''])[0], ppref:(plTok.match(/^\D+/)||[''])[0],
+    ldig:lm[0].length, pdig:pm[0].length };
+}
+// Construiește/actualizează schema din codurile de inventar, oricare ar fi formatul,
+// apoi normalizează cheile inventarului la formatul schemei (ca să se potrivească celulele).
 function applySchemaFromInventory(){
   const codes=Object.keys(inventory).filter(k=>inventory[k]&&inventory[k].length);
   if(!codes.length) return null;
-  const detectSep=code=>{ for(const s of ['-','/','.','_',' ']){ if(code.split(s).length>=3) return s; } return '-'; };
-  const sep=detectSep(codes[0]);
-  const need={}; let ld=1,pd=1,parsed=0;
-  codes.forEach(code=>{ const p=code.split(sep); if(p.length<3) return;
-    const name=p[0], lv=p[p.length-2], pl=p[p.length-1], ln=parseInt(lv,10), pn=parseInt(pl,10);
-    if(isNaN(ln)||isNaN(pn)) return;
-    ld=Math.max(ld,(lv.match(/\d/g)||[]).length); pd=Math.max(pd,(pl.match(/\d/g)||[]).length);
-    const m=need[name]||(need[name]={lmax:0,pmax:0}); m.lmax=Math.max(m.lmax,ln); m.pmax=Math.max(m.pmax,pn); parsed++;
+  const need={}; let ld=1,pd=1,parsed=0,unmatched=0; let sep='-',lpref='',ppref='',prefSeen=0;
+  const parsedMap={};
+  codes.forEach(code=>{ const info=parseLoc(code);
+    if(!info){ unmatched++; return; }
+    parsedMap[code]=info; parsed++;
+    sep=info.sep; ld=Math.max(ld,info.ldig); pd=Math.max(pd,info.pdig);
+    if(info.lpref||info.ppref){ if(!prefSeen){ lpref=info.lpref; ppref=info.ppref; prefSeen=1; } }
+    const m=need[info.name]||(need[info.name]={lmax:0,pmax:0});
+    m.lmax=Math.max(m.lmax,info.L); m.pmax=Math.max(m.pmax,info.P);
   });
-  if(!parsed) return null;   // coduri gen A01-N01-R01 → nu atingem nimic
-  $('lpref').value=''; $('ppref').value=''; $('ldig').value=ld; $('pdig').value=pd; $('sep').value=sep;
+  if(!parsed) return { added:0, extended:0, parsed:0, unmatched };
+  // potrivește formatul schemei la ce e în Excel
+  $('lpref').value=lpref; $('ppref').value=ppref; $('ldig').value=ld; $('pdig').value=pd; $('sep').value=sep;
   let added=0, extended=0;
   const existing={}; readRacks().forEach(r=>existing[r.name.toUpperCase()]=r.el);
   Object.keys(need).sort().forEach(name=>{ const m=need[name], key=name.toUpperCase();
@@ -529,13 +555,25 @@ function applySchemaFromInventory(){
       lvI.value=nl; plI.value=np;
     } else { addRackRaw(name, Math.max(1,m.lmax), Math.max(1,m.pmax)); added++; }
   });
-  refresh(); loadDims($('dimRack').value); pushConfig();
-  return {added,extended,parsed,racks:Object.keys(need).length};
+  // normalizează cheile inventarului la formatul canonic al schemei
+  const g=globals(), fresh={};
+  Object.keys(inventory).forEach(code=>{ const info=parsedMap[code];
+    const key=info ? `${info.name}${g.sep}${g.lpref}${pad(info.L,g.ldig)}${g.sep}${g.ppref}${pad(info.P,g.pdig)}` : code.toUpperCase();
+    (fresh[key]=fresh[key]||[]).push(...inventory[code]);
+  });
+  for(const k in inventory) delete inventory[k];
+  Object.keys(fresh).forEach(k=>inventory[k]=fresh[k]);
+  // dacă importul a creat rafturi noi, arată toate rafturile (altfel rămân ascunse de filtru)
+  if(added>0){ const sf=$('schemaRackFilter'); if(sf) sf.value='all'; }
+  refresh(); loadDims($('dimRack').value); pushConfig(); pushAllInventory();
+  return { added, extended, parsed, unmatched, racks:Object.keys(need).length };
 }
 function syncSchemaFromInventory(){
   const res=applySchemaFromInventory();
-  if(!res){ $('invStatus').textContent='Nu ai locații cu format Raft-X-Y (ex. F05-27-04) în inventar.'; return; }
-  $('invStatus').textContent=`Gata: ${res.added} rafturi noi, ${res.extended} extinse.`;
+  if(!res||!res.parsed){ $('invStatus').textContent='Nu am putut interpreta codurile de locație (ex. F05-27-04 sau A01-N01-R01).'; return; }
+  let msg=`Gata: ${res.added} rafturi noi, ${res.extended} extinse.`;
+  if(res.unmatched>0) msg+=` ⚠️ ${res.unmatched} coduri neinterpretabile.`;
+  $('invStatus').textContent=msg;
   document.querySelector('.tab[data-v="schema"]').click();
 }
 $('btnSyncSchema').addEventListener('click', syncSchemaFromInventory);
@@ -648,6 +686,16 @@ $('invExport').addEventListener('click',()=>{ try{
 }catch(e){ $('invExpStatus').textContent='Eroare.'; } });
 
 // ---------- SVG schemă locații ----------
+// Culoare celulă după cât de plină e (când g.cap > 0): gri→verde→galben→portocaliu→roșu.
+function occColors(occ,total,cap){
+  if(!occ) return {fill:'#f8fafc',stroke:'#cbd5e1'};          // gol
+  if(!cap||cap<=0) return {fill:'#dcfce7',stroke:'#4ade80'};  // ocupat (fără capacitate → verde)
+  const r=total/cap;
+  if(r<=0.34) return {fill:'#dcfce7',stroke:'#4ade80'};       // mult spațiu liber
+  if(r<=0.67) return {fill:'#fef9c3',stroke:'#eab308'};       // ~jumătate
+  if(r<0.999) return {fill:'#ffedd5',stroke:'#f97316'};       // aproape plin
+  return {fill:'#fee2e2',stroke:'#ef4444'};                    // plin
+}
 function buildSVG(r,g){
   const many = r.pallets>14 || r.levels>14;
   const cellW = many?94:140, cellH = many?58:82;
@@ -668,11 +716,13 @@ function buildSVG(r,g){
       const inv=invByCode(code), occ=inv&&inv.length;
       const total=occ?inv.reduce((a,p)=>a+(+p.cant||0),0):0;
       const sel=(code.toUpperCase()===selectedCode);
-      const fill=occ?'#dcfce7':'#f8fafc';
-      const stroke=sel?'#2563eb':(occ?'#4ade80':'#cbd5e1');
+      const col=occColors(occ,total,g.cap);
+      const fill=col.fill;
+      const stroke=sel?'#2563eb':col.stroke;
       const sw=sel?2.5:1;
       s+=`<g data-code="${esc(code)}" style="cursor:pointer">`;
-      if(occ) s+=`<title>${esc(code)} — ${esc(inv.map(p=>p.produs+' ×'+p.cant).join(', '))}</title>`;
+      if(occ){ const fillTxt=g.cap>0?` — ${total}/${g.cap} (${Math.round(total/g.cap*100)}%)`:'';
+        s+=`<title>${esc(code)}${fillTxt} — ${esc(inv.map(p=>p.produs+' ×'+p.cant).join(', '))}</title>`; }
       s+=`<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
       if(g.mode==='both'){
         s+=`<text x="${x+cellW/2}" y="${y+cellH/2+cellH*0.09}" text-anchor="middle" font-size="${Math.max(11,cellH*0.25)}" font-weight="700" fill="#0f172a">${esc(code)}</text>`;
@@ -789,8 +839,24 @@ function schemaHTML(){
   const shown=(f==='all')?rs:rs.filter(r=>r.id===f);
   return shown.map(r=>`<div class="rack-svg">${buildSVG(r,g).svg}</div>`).join('');
 }
+function renderLegend(g){
+  const lg=$('legend'); if(!lg) return;
+  const sw=(bg,bd,txt)=>`<span><i style="background:${bg};border:1px solid ${bd}"></i> ${txt}</span>`;
+  if(g.cap>0){
+    lg.innerHTML=sw('#f8fafc','#cbd5e1','gol')
+      +sw('#dcfce7','#4ade80','≤34%')
+      +sw('#fef9c3','#eab308','~50%')
+      +sw('#ffedd5','#f97316','aproape plin')
+      +sw('#fee2e2','#ef4444','plin')
+      +'<span class="tip">Culoare după cât de plin (cap. '+g.cap+' buc/palet)</span>';
+  }else{
+    lg.innerHTML=sw('#dcfce7','#4ade80','ocupat')+sw('#f8fafc','#cbd5e1','liber')
+      +'<span class="tip">Click pe o celulă pentru detalii</span>';
+  }
+}
 function refresh(){
   const g=globals(),racks=readRacks();
+  renderLegend(g);
   let tot=0;
   for(const r of racks){const c=r.levels*r.pallets;tot+=c;r.el.querySelector('.cnt').textContent=`${c} poziții`;}
   $('tot').textContent=tot.toLocaleString('ro-RO'); $('nr').textContent=racks.length;
@@ -857,7 +923,7 @@ function exportExcel(){
     const dh=['Raft','Wb','Uw','D','Bh','h0','hp','topClear','palletL','palletW','Pf','Pd','goodsH','load'];
     const dm=[dh]; racks.forEach(r=>{const d=getDims(r.id);dm.push([r.name,d.Wb,d.Uw,d.D,d.Bh,d.h0,d.hp,d.topClear,d.palletL,d.palletW,d.Pf,d.Pd,d.goodsH,d.load]);});
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(dm),'Dimensiuni');
-    const g=globals(), st=[['Cheie','Valoare'],['lpref',g.lpref],['ppref',g.ppref],['ldig',g.ldig],['pdig',g.pdig],['sep',g.sep],['base',g.base],['pdir',g.pdir],['mode',g.mode]];
+    const g=globals(), st=[['Cheie','Valoare'],['lpref',g.lpref],['ppref',g.ppref],['ldig',g.ldig],['pdig',g.pdig],['sep',g.sep],['base',g.base],['pdir',g.pdir],['mode',g.mode],['cap',g.cap]];
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(st),'Setari');
     const invRows=[['Locatie','Produs','Cantitate','Data']];
     for(const k in inventory) inventory[k].forEach(x=>invRows.push([k,x.produs,x.cant,x.data||'']));
@@ -879,7 +945,7 @@ function importExcel(file){
       if(sSheet){ const map={}; XLSX.utils.sheet_to_json(sSheet).forEach(o=>map[o.Cheie]=o.Valoare);
         const set=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
         set('lpref',map.lpref);set('ppref',map.ppref);set('ldig',map.ldig);set('pdig',map.pdig);
-        set('sep',map.sep);set('base',map.base);set('pdir',map.pdir);set('cellmode',map.mode);
+        set('sep',map.sep);set('base',map.base);set('pdir',map.pdir);set('cellmode',map.mode);set('capacity',map.cap);
       }
       $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
       const list=rows.length?rows:[['A01',4,3]];
@@ -955,7 +1021,7 @@ function currentState(){ return { racks:readRacks().map(r=>({name:r.name,levels:
 function applyState(st){
   const g=st.g||{}, setv=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
   setv('lpref',g.lpref);setv('ppref',g.ppref);setv('ldig',g.ldig);setv('pdig',g.pdig);
-  setv('sep',g.sep);setv('base',g.base);setv('pdir',g.pdir);setv('cellmode',g.mode);
+  setv('sep',g.sep);setv('base',g.base);setv('pdir',g.pdir);setv('cellmode',g.mode);setv('capacity',g.cap);
   $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
   const racks=(st.racks&&st.racks.length)?st.racks:[{name:'A01',levels:4,pallets:3},{name:'A02',levels:4,pallets:3}];
   racks.forEach(r=>{ const id=addRackRaw(r.name,r.levels,r.pallets); if(r.dims) dimStore[id]={...DEF,...r.dims}; });
