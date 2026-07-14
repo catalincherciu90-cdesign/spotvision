@@ -1,12 +1,13 @@
 // ================================================================
-//  Helper comun pentru Cloudflare Pages Functions.
-//  Ține locul lui data.json din server.js, dar pe Cloudflare KV.
+//  Acces la baza de date pentru Cloudflare Pages Functions.
+//  Ține locul lui data.json / server.js, dar pe Cloudflare D1 (SQL).
 //
-//  Model de date (identic cu server.js):
-//    KV["config"]     -> { racks: [...], g: {...} }
-//    KV["inventory"]  -> { "COD-LOCATIE": [ {produs,cant,data}, ... ], ... }
+//  Model:
+//    tabela config    -> un rand (id=1) cu racks (JSON) si g (JSON)
+//    tabela inventory  -> cate un rand per produs: code, produs, cant, data, pos
 //
-//  Binding KV așteptat:  RAFT_DB  (se creează în Cloudflare — vezi DEPLOY-cloudflare.md)
+//  Binding D1 asteptat:  DB   (se leaga in Cloudflare — vezi DEPLOY-cloudflare.md)
+//  Schema:               schema.sql
 // ================================================================
 
 export const json = (data, status = 200) =>
@@ -18,10 +19,10 @@ export const json = (data, status = 200) =>
     },
   });
 
-// Răspuns clar dacă cineva a uitat să lege namespace-ul KV la variabila RAFT_DB.
-export const noKv = () =>
+// Raspuns clar daca lipseste binding-ul bazei de date.
+export const noDb = () =>
   json(
-    { error: 'Lipsește binding-ul KV „RAFT_DB". Leagă un namespace KV în Cloudflare (vezi DEPLOY-cloudflare.md).' },
+    { error: 'Lipsește baza de date „DB". Leagă un D1 database în Cloudflare (vezi DEPLOY-cloudflare.md).' },
     500
   );
 
@@ -30,27 +31,76 @@ export async function readBody(request) {
   catch (e) { return {}; }
 }
 
+// ---------- config (rafturi + setari) ----------
 export async function getConfig(env) {
-  let c = {};
-  try { const raw = await env.RAFT_DB.get('config'); c = raw ? JSON.parse(raw) : {}; }
-  catch (e) { c = {}; }
+  const row = await env.DB.prepare('SELECT racks, g FROM config WHERE id = 1').first();
+  let racks = [], g = {};
+  try { racks = JSON.parse(row?.racks || '[]'); } catch (e) { racks = []; }
+  try { g = JSON.parse(row?.g || '{}'); } catch (e) { g = {}; }
   return {
-    racks: Array.isArray(c.racks) ? c.racks : [],
-    g: (c.g && typeof c.g === 'object') ? c.g : {},
+    racks: Array.isArray(racks) ? racks : [],
+    g: (g && typeof g === 'object') ? g : {},
   };
 }
 
 export async function putConfig(env, c) {
-  await env.RAFT_DB.put('config', JSON.stringify(c));
+  await env.DB
+    .prepare('INSERT INTO config (id, racks, g) VALUES (1, ?1, ?2) ' +
+             'ON CONFLICT(id) DO UPDATE SET racks = ?1, g = ?2')
+    .bind(JSON.stringify(c.racks || []), JSON.stringify(c.g || {}))
+    .run();
 }
 
+// ---------- inventar ----------
+function rowsToInv(rows) {
+  const inv = {};
+  for (const r of (rows || [])) {
+    (inv[r.code] = inv[r.code] || []).push({
+      produs: r.produs,
+      cant: r.cant,
+      data: r.data || '',
+    });
+  }
+  return inv;
+}
+
+// Intreg inventarul, sub forma { COD: [{produs,cant,data}, ...] }
 export async function getInv(env) {
-  let i = {};
-  try { const raw = await env.RAFT_DB.get('inventory'); i = raw ? JSON.parse(raw) : {}; }
-  catch (e) { i = {}; }
-  return (i && typeof i === 'object') ? i : {};
+  const { results } = await env.DB
+    .prepare('SELECT code, produs, cant, data FROM inventory ORDER BY code, pos, rowid')
+    .all();
+  return rowsToInv(results);
 }
 
-export async function putInv(env, inv) {
-  await env.RAFT_DB.put('inventory', JSON.stringify(inv));
+// Inlocuieste produsele unei singure locatii (atomic, in tranzactie).
+export async function putLoc(env, code, arr) {
+  const stmts = [env.DB.prepare('DELETE FROM inventory WHERE code = ?1').bind(code)];
+  (Array.isArray(arr) ? arr : []).forEach((x, i) => {
+    stmts.push(
+      env.DB
+        .prepare('INSERT INTO inventory (code, produs, cant, data, pos) VALUES (?1, ?2, ?3, ?4, ?5)')
+        .bind(code, String(x.produs || ''), Number(x.cant) || 0, String(x.data || ''), i)
+    );
+  });
+  await env.DB.batch(stmts);
+}
+
+export async function deleteLoc(env, code) {
+  await env.DB.prepare('DELETE FROM inventory WHERE code = ?1').bind(code).run();
+}
+
+// Inlocuieste TOT inventarul (obiect { COD: [...] }).
+export async function putAllInv(env, inv) {
+  const stmts = [env.DB.prepare('DELETE FROM inventory')];
+  for (const rawCode of Object.keys(inv || {})) {
+    const code = String(rawCode).toUpperCase();
+    (Array.isArray(inv[rawCode]) ? inv[rawCode] : []).forEach((x, i) => {
+      stmts.push(
+        env.DB
+          .prepare('INSERT INTO inventory (code, produs, cant, data, pos) VALUES (?1, ?2, ?3, ?4, ?5)')
+          .bind(code, String(x.produs || ''), Number(x.cant) || 0, String(x.data || ''), i)
+      );
+    });
+  }
+  await env.DB.batch(stmts);
 }

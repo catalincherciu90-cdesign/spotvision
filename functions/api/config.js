@@ -1,9 +1,9 @@
 // PUT /api/config   body: { racks?, g? }
 // Echivalentul lui `PUT /api/config` din server.js.
-import { getConfig, putConfig, readBody, json, noKv } from '../_db.js';
+import { getConfig, putConfig, readBody, json, noDb } from '../_db.js';
 
 export async function onRequestPut({ request, env }) {
-  if (!env.RAFT_DB) return noKv();
+  if (!env.DB) return noDb();
   const body = await readBody(request);
   const c = await getConfig(env);
   if (Array.isArray(body.racks)) c.racks = body.racks;

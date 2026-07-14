@@ -1,26 +1,20 @@
 // PUT    /api/inventory/:code   body: [ {produs,cant,data}, ... ]
 // DELETE /api/inventory/:code
 // Echivalentul rutelor pe cod din server.js (setează / șterge o locație).
-import { getInv, putInv, readBody, json, noKv } from '../../_db.js';
+import { putLoc, deleteLoc, readBody, json, noDb } from '../../_db.js';
 
 const norm = (params) => decodeURIComponent(String(params.code || '')).toUpperCase();
 
 export async function onRequestPut({ request, env, params }) {
-  if (!env.RAFT_DB) return noKv();
+  if (!env.DB) return noDb();
   const code = norm(params);
   const arr = await readBody(request);
-  const inv = await getInv(env);
-  if (Array.isArray(arr) && arr.length) inv[code] = arr;
-  else delete inv[code];
-  await putInv(env, inv);
+  await putLoc(env, code, Array.isArray(arr) ? arr : []);
   return json({ ok: true });
 }
 
 export async function onRequestDelete({ env, params }) {
-  if (!env.RAFT_DB) return noKv();
-  const code = norm(params);
-  const inv = await getInv(env);
-  delete inv[code];
-  await putInv(env, inv);
+  if (!env.DB) return noDb();
+  await deleteLoc(env, norm(params));
   return json({ ok: true });
 }
