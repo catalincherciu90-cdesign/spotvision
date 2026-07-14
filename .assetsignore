@@ -1,0 +1,24 @@
+# Fisiere care NU trebuie servite public (raman doar in repo).
+# Sintaxa: ca .gitignore.
+/src
+/functions
+/node_modules
+/.git
+/.wrangler
+*.md
+*.sql
+*.mjs
+*.bat
+*.toml
+server.js
+data.json
+.gitignore
+.assetsignore
+.dev.vars
+_big.png
+_nr.png
+_preview.png
+_sch.png
+_schema2.png
+_schema_preview.png
+_tech.png

@@ -1,3 +1,0 @@
-# Serveste aplicatia la radacina fara sa redenumim schema-raft.html.
-# 200 = rewrite (URL-ul ramane "/"), nu redirect.
-/    /schema-raft.html    200

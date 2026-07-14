@@ -1,35 +1,13 @@
 // ================================================================
-//  Acces la baza de date pentru Cloudflare Pages Functions.
-//  Ține locul lui data.json / server.js, dar pe Cloudflare D1 (SQL).
+//  Acces la baza de date (Cloudflare D1 / SQLite) pentru Worker.
 //
 //  Model:
 //    tabela config    -> un rand (id=1) cu racks (JSON) si g (JSON)
 //    tabela inventory  -> cate un rand per produs: code, produs, cant, data, pos
 //
-//  Binding D1 asteptat:  DB   (se leaga in Cloudflare — vezi DEPLOY-cloudflare.md)
+//  Binding D1 asteptat:  DB   (definit in wrangler.toml)
 //  Schema:               schema.sql
 // ================================================================
-
-export const json = (data, status = 200) =>
-  new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  });
-
-// Raspuns clar daca lipseste binding-ul bazei de date.
-export const noDb = () =>
-  json(
-    { error: 'Lipsește baza de date „DB". Leagă un D1 database în Cloudflare (vezi DEPLOY-cloudflare.md).' },
-    500
-  );
-
-export async function readBody(request) {
-  try { return await request.json(); }
-  catch (e) { return {}; }
-}
 
 // ---------- config (rafturi + setari) ----------
 export async function getConfig(env) {

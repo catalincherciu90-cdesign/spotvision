@@ -1,20 +1,18 @@
-# Configuratie Cloudflare Pages pentru SpotVision (schema rafturi).
-# Frontend static (schema-raft.html) + Functions in /functions (inlocuiesc server.js).
+# Configuratie Cloudflare Worker pentru SpotVision (schema rafturi).
+# Un singur Worker (src/index.js) serveste aplicatia statica + API-ul pe D1.
 
 name = "spotvision"
+main = "src/index.js"
 compatibility_date = "2024-11-06"
-pages_build_output_dir = "."
+
+# Fisierele statice (schema-raft.html etc.) sunt servite prin binding-ul ASSETS.
+# .assetsignore exclude fisierele care nu trebuie publicate (cod server, docs...).
+[assets]
+directory = "."
+binding = "ASSETS"
 
 # --- Baza de date partajata (Cloudflare D1) ---
-# Baza de date D1 se poate lega in DOUA feluri (alege unul):
-#
-#  A) Din dashboard Cloudflare (recomandat, nu are nevoie de ID aici):
-#     Pages -> proiectul tau -> Settings -> Functions -> D1 database bindings
-#     Variable name: DB   ->   baza ta de date D1
-#
-#  B) Din wrangler CLI: blocul de mai jos e completat cu ID-ul bazei tale.
-#     (ID-ul se obtine cu:  npx wrangler d1 create spotvision )
-
+# La deploy, acest bloc leaga automat baza de date la Worker (binding: DB).
 [[d1_databases]]
 binding = "DB"
 database_name = "spotvision"
