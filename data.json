@@ -1,0 +1,15 @@
+{
+  "racks": [
+    {
+      "name": "A01",
+      "levels": 4,
+      "pallets": 3,
+      "dims": {}
+    }
+  ],
+  "g": {
+    "lpref": "N",
+    "ppref": "R"
+  },
+  "inv": {}
+}

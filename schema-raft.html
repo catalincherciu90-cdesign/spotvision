@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schemă rafturi depozit</title>
+<style>
+  :root{--bg:#f4f5f7;--card:#fff;--ink:#1a1d21;--muted:#6b7280;--line:#e4e6ea;--accent:#2563eb;--accent-d:#1d4ed8}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 24px 0}
+  header h1{margin:0;font-size:20px}
+  header p{margin:4px 0 12px;color:var(--muted);font-size:14px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap}
+  .tab{background:none;border:0;border-bottom:3px solid transparent;padding:10px 16px;font-size:15px;font-weight:600;color:var(--muted);cursor:pointer}
+  .tab.active{color:var(--accent-d);border-bottom-color:var(--accent)}
+  .badge{display:inline-block;margin:8px 0 12px;font-size:12px;font-weight:600;padding:3px 11px;border-radius:20px}
+  .badge.on{background:#dcfce7;color:#15803d}
+  .badge.off{background:#fee2e2;color:#b91c1c}
+  .badge.local{background:#e5e7eb;color:#374151}
+  .wrap{max-width:none;margin:0;padding:24px;display:grid;grid-template-columns:330px 1fr;gap:24px}
+  @media(max-width:860px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:20px}
+  .card h2{margin:0 0 14px;font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+  .field label{font-size:13px;color:var(--muted)}
+  .field input,.field select{padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:15px;width:100%;background:#fff}
+  .field input:focus{outline:none;border-color:var(--accent)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .zrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:10px}
+  .hint{font-size:12px;color:var(--muted);margin-top:2px}
+  #racks{max-height:62vh;overflow:auto;padding-right:4px}
+  .rack{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;background:#fafbfc}
+  .rack-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .rack-head b{font-size:14px}.rack-head .cnt{font-size:12px;color:var(--muted);font-weight:400;margin-left:auto;margin-right:10px}
+  .rmr{background:#fee2e2;color:#b91c1c;border:0;border-radius:7px;padding:5px 9px;font-size:13px;font-weight:600;cursor:pointer}
+  .rmr:hover{background:#fecaca}
+  .addr{background:#e0edff;color:var(--accent-d);border:1px dashed #93b4f5;border-radius:9px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;width:100%}
+  .addr:hover{background:#d3e3ff}
+  button.main{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:11px 16px;font-size:15px;font-weight:600;cursor:pointer;width:100%;margin-top:8px}
+  button.main:hover{background:var(--accent-d)}
+  button.alt{background:#16a34a}button.alt:hover{background:#15803d}
+  button.ghost{background:#eef2ff;color:var(--accent-d)}button.ghost:hover{background:#e0e7ff}
+  .total{font-size:24px;font-weight:800;margin:0 0 12px}
+  .total small{display:block;font-size:13px;font-weight:400;color:var(--muted)}
+  .stage{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;overflow:auto}
+  .rack-svg{margin-bottom:26px}
+  .rack-svg svg{height:auto;display:block;margin:0}
+  #techDraw svg,#dimPreview svg{max-width:100%;height:auto;display:block;margin:0}
+  #viewSchema .stage{max-height:78vh}
+  .zoombar{display:flex;align-items:center;gap:8px;margin:0 0 12px}
+  .zoombar button{width:32px;height:32px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-size:16px;font-weight:700}
+  .zoombar #zFit{width:auto;padding:0 12px;font-size:13px}
+  .zoombar input[type=range]{flex:1;max-width:220px}
+  .zoombar #zVal{font-size:13px;color:var(--muted);width:46px;text-align:right}
+  .rackfilter{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+  .rackfilter label{font-size:13px;color:var(--muted)}
+  .rackfilter select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;min-width:200px;background:#fff}
+  .status{font-size:13px;color:var(--muted);margin-top:8px;min-height:18px}
+  .sub{font-size:12px;color:var(--muted);margin:0 0 10px}
+  .legend{display:flex;gap:16px;align-items:center;font-size:13px;color:var(--muted);margin:0 0 12px}
+  .legend i{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin-right:4px}
+  .legend .tip{margin-left:auto;font-style:italic}
+  #locPanel h3{margin:0 0 4px;font-size:17px}
+  #locPanel .close{float:right;cursor:pointer;color:var(--muted);font-size:20px;line-height:1;border:0;background:none}
+  #locPanel table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}
+  #locPanel th,#locPanel td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  #locPanel th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
+  #locPanel td.q{text-align:right;font-weight:700}
+  #locPanel .tot{font-weight:800}
+  #locPanel .empty{color:var(--muted);margin-top:6px}
+  .prow{display:grid;grid-template-columns:1fr 66px 140px 34px;gap:8px;margin-bottom:8px}
+  #fifoResult h3{margin:0 0 6px;font-size:16px}
+  #fifoResult ol{margin:6px 0 0;padding-left:22px}
+  #fifoResult li{margin:5px 0}
+  #fifoResult .first{background:#dcfce7;border-radius:6px;padding:2px 6px}
+  #fifoResult .code{font-weight:700;color:#2563eb;cursor:pointer}
+  #fifoResult .code:hover{text-decoration:underline}
+  #invTableWrap .code:hover{text-decoration:underline}
+  .fifo-tag{display:inline-block;background:#16a34a;color:#fff;font-size:11px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px}
+  .prow input{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;width:100%}
+  .prow .prm{background:#fee2e2;color:#b91c1c;border:0;border-radius:7px;cursor:pointer;font-weight:700}
+  .prow .prm:hover{background:#fecaca}
+  #invTableWrap table{width:100%;border-collapse:collapse;font-size:14px}
+  #invTableWrap th,#invTableWrap td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  #invTableWrap th{color:var(--muted);font-size:12px;text-transform:uppercase;position:sticky;top:0;background:#fff}
+  #invTableWrap td.q{text-align:right;font-weight:700}
+  #invTableWrap tr.loc td{border-top:2px solid #e2e8f0}
+  #invTableWrap .code{font-weight:700;color:#2563eb;cursor:pointer}
+  #invTableWrap .empty{color:var(--muted);padding:20px;text-align:center}
+  .invsearchbar input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;margin:0 0 10px}
+  .invsearchbar input:focus{outline:none;border-color:var(--accent)}
+  .delp{background:#fee2e2;color:#b91c1c;border:0;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:700;cursor:pointer}
+  .delp:hover{background:#fecaca}
+  @media print{
+    body{background:#fff}
+    header,.controls{display:none!important}
+    .wrap{display:block;padding:0;max-width:none}
+    .stage{border:0;padding:0}
+    .rack-svg{margin:0;page-break-after:always;break-after:page}
+    .rack-svg svg{width:auto!important;max-width:100%!important}
+    #viewSchema .stage{max-height:none}
+    .noprint{display:none!important}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Schemă rafturi depozit</h1>
+  <p>Schema locațiilor, dimensiunile fizice și schița tehnică cotată — pentru unul sau mai multe rafturi.</p>
+  <div class="tabs">
+    <button class="tab active" data-v="schema">Schemă locații</button>
+    <button class="tab" data-v="inv">Inventar</button>
+    <button class="tab" data-v="dim">Dimensiuni raft</button>
+    <button class="tab" data-v="tech">Schiță tehnică</button>
+  </div>
+  <div id="syncBadge" class="badge">—</div>
+</header>
+
+<!-- ============ VIEW: SCHEMA LOCATII ============ -->
+<div id="viewSchema">
+<div class="wrap">
+  <div class="controls">
+    <div class="card">
+      <h2>Rafturi</h2>
+      <p class="hint" style="margin-top:0;margin-bottom:12px">Un rând pentru fiecare raft. Nume, câte niveluri și câți paleți pe nivel.</p>
+      <div id="racks"></div>
+      <button class="addr" id="addRack">➕ Adaugă raft</button>
+      <button class="main ghost" id="btnRackCfg" style="margin-top:12px">📂 Încarcă config rafturi (Excel)</button>
+      <button class="main ghost" id="btnRackCfgModel" style="margin-top:6px">Descarcă model config</button>
+      <input type="file" id="fileRackCfg" accept=".xlsx,.xls" hidden>
+      <p class="hint" id="rackCfgStatus" style="margin-top:6px">Excel cu o coloană pentru numele raftului + coloanele <b>Nivele</b> și <b>Rand</b>.</p>
+    </div>
+    <div class="card">
+      <h2>Format cod (comun)</h2>
+      <div class="row">
+        <div class="field"><label>Prefix nivel</label><input id="lpref" value="N" maxlength="4"><span class="hint">N → N01</span></div>
+        <div class="field"><label>Prefix rând paleți</label><input id="ppref" value="R" maxlength="4"><span class="hint">R → R01</span></div>
+      </div>
+      <div class="zrow">
+        <div class="field"><label>Cifre nivel</label><input id="ldig" type="number" min="1" max="3" value="2"></div>
+        <div class="field"><label>Cifre palet</label><input id="pdig" type="number" min="1" max="3" value="2"></div>
+        <div class="field"><label>Separator</label><input id="sep" value="-"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Afișare</h2>
+      <div class="field"><label>Nivelul 1 este...</label>
+        <select id="base"><option value="bottom" selected>jos (ca în realitate)</option><option value="top">sus</option></select></div>
+      <div class="field"><label>Numerotare paleți</label>
+        <select id="pdir"><option value="ltr" selected>de la stânga la dreapta</option><option value="rtl">de la dreapta la stânga</option></select></div>
+      <div class="field"><label>Text în celulă</label>
+        <select id="cellmode"><option value="both" selected>Palet mare + cod complet</option><option value="code">Doar codul complet</option><option value="num">Doar numărul paletului</option></select></div>
+    </div>
+    <div class="card">
+      <h2>Salvare (Excel)</h2>
+      <p class="hint" style="margin-top:0;margin-bottom:10px">Salvează toate valorile (rafturi, dimensiuni, setări) într-un fișier Excel și le încarci înapoi când vrei.</p>
+      <button class="main ghost" id="btnSave">💾 Salvează valorile în Excel</button>
+      <button class="main ghost" id="btnLoad" style="margin-top:8px">📂 Încarcă din Excel</button>
+      <input type="file" id="fileXlsx" accept=".xlsx,.xls" hidden>
+      <div class="status" id="ioStatus"></div>
+      <p class="hint" style="margin-top:10px">✓ Salvare automată în browser — datele reapar la următoarea deschidere.</p>
+      <button class="main ghost" id="btnReset" style="margin-top:6px;color:#b91c1c;background:#fee2e2">🗑️ Resetează tot (șterge memoria)</button>
+    </div>
+    <div class="card">
+      <h2>Export</h2>
+      <button class="main alt" id="btnPrint">Printează (un raft / pagină)</button>
+      <button class="main" id="btnPdf" style="background:#7c3aed">Descarcă PDF (un raft / pagină)</button>
+      <button class="main" id="btnPng">Descarcă PNG (toate)</button>
+      <div class="status" id="status"></div>
+    </div>
+  </div>
+  <div>
+    <p class="total noprint"><span id="tot">0</span><small>poziții de palet, din <span id="nr">0</span> rafturi · <span id="occ">0</span> ocupate</small></p>
+    <div class="legend noprint">
+      <span><i style="background:#dcfce7;border:1px solid #4ade80"></i> ocupat</span>
+      <span><i style="background:#f8fafc;border:1px solid #cbd5e1"></i> liber</span>
+      <span class="tip">Click pe o celulă pentru detalii</span>
+    </div>
+    <div class="rackfilter noprint">
+      <label for="schemaRackFilter">Afișează:</label>
+      <select id="schemaRackFilter"></select>
+    </div>
+    <div id="zoombar" class="zoombar noprint">
+      <button id="zOut" title="Micșorează">–</button>
+      <input type="range" id="zoom" min="25" max="200" value="100">
+      <span id="zVal">100%</span>
+      <button id="zIn" title="Mărește">+</button>
+      <button id="zFit" title="Încadrează în lățime">Potrivește</button>
+    </div>
+    <div id="locPanel" class="card noprint" style="display:none"></div>
+    <div class="stage"><div id="schema"></div></div>
+  </div>
+</div>
+</div>
+
+<!-- ============ VIEW: DIMENSIUNI RAFT ============ -->
+<div id="viewDim" hidden>
+<div class="wrap">
+  <div class="controls">
+    <div class="card">
+      <h2>Alege raftul</h2>
+      <div class="field"><label>Raft (din tab-ul Schemă)</label><select id="dimRack"></select>
+        <span class="hint">Setezi dimensiuni separate pentru fiecare raft.</span></div>
+      <button class="main ghost" id="applyAll">Aplică aceste dimensiuni la toate rafturile</button>
+    </div>
+    <div id="dimInputs">
+      <div class="card">
+        <h2>Cote structură (mm)</h2>
+        <div class="row">
+          <div class="field"><label>Deschidere (lățime bay)</label><input id="tWb" type="number" value="2700"></div>
+          <div class="field"><label>Lățime montant</label><input id="tUw" type="number" value="100"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Adâncime raft</label><input id="tD" type="number" value="1100"></div>
+          <div class="field"><label>Secțiune grindă</label><input id="tBh" type="number" value="120"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Înălțime nivel 1 (de la sol)</label><input id="tH0" type="number" value="1800"></div>
+          <div class="field"><label>Pas între niveluri</label><input id="tHp" type="number" value="1600"></div>
+        </div>
+        <div class="field"><label>Spațiu deasupra ultimului nivel</label><input id="tTop" type="number" value="1600"></div>
+      </div>
+      <div class="card">
+        <h2>Palet & marfă (mm)</h2>
+        <div class="row">
+          <div class="field"><label>Lungime palet</label><input id="tPL" type="number" value="1200"></div>
+          <div class="field"><label>Lățime palet</label><input id="tPW" type="number" value="800"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Față palet (vedere din față)</label><input id="tPf" type="number" value="800"></div>
+          <div class="field"><label>Adâncime palet (în raft)</label><input id="tPd" type="number" value="1200"></div>
+        </div>
+        <div class="field"><label>Înălțime marfă</label><input id="tGoods" type="number" value="1200"></div>
+      </div>
+      <div class="card">
+        <h2>Capacitate</h2>
+        <div class="field"><label>Sarcină / nivel (pereche grinzi), kg</label><input id="tLoad" type="number" value="1000"></div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <p class="sub noprint">Previzualizare cotată a raftului ales. Modifică valorile din stânga și vezi efectul imediat.</p>
+    <div class="stage"><div id="dimPreview"></div></div>
+  </div>
+</div>
+</div>
+
+<!-- ============ VIEW: INVENTAR ============ -->
+<div id="viewInv" hidden>
+<div class="wrap">
+  <div class="controls">
+    <div class="card">
+      <h2>Inventar (Excel)</h2>
+      <p class="hint" style="margin-top:0;margin-bottom:10px">Încarcă un Excel cu ce e în rafturi. Recunoaște coloane precum <b>Locatie</b>, <b>Denumire Produs</b> (sau Produs / cod produs), <b>Cantitate</b> și <b>Data introducere BO</b> (sau Data creare palet / Data) pentru FIFO. Celulele ocupate se colorează verde; click = vezi produsele.</p>
+      <button class="main" id="btnInv" style="background:#16a34a">📦 Încarcă inventar din Excel</button>
+      <button class="main ghost" id="btnInvModel" style="margin-top:8px">Descarcă model inventar</button>
+      <button class="main ghost" id="btnInvClear" style="margin-top:8px">Șterge inventarul</button>
+      <button class="main" id="btnSyncSchema" style="margin-top:8px;background:#0891b2">🔄 Sincronizează schema cu locațiile</button>
+      <input type="file" id="fileInv" accept=".xlsx,.xls" hidden>
+      <div class="status" id="invStatus"></div>
+    </div>
+    <div class="card">
+      <h2>Alege locația</h2>
+      <div class="field"><label>Raft</label><select id="invRack"></select></div>
+      <div class="row">
+        <div class="field"><label>Nivel</label><select id="invLevel"></select></div>
+        <div class="field"><label>Palet</label><select id="invPallet"></select></div>
+      </div>
+      <p class="hint">Cod locație: <b id="invCode">—</b></p>
+    </div>
+    <div class="card">
+      <h2>Produse pe acest palet</h2>
+      <div id="prodRows"></div>
+      <button class="addr" id="addProd" style="margin-top:4px">➕ Adaugă produs</button>
+      <p class="hint" style="margin-top:10px">Denumire, cantitate și <b>data intrării</b> (pentru FIFO). Se salvează automat.</p>
+    </div>
+    <div class="card">
+      <h2>FIFO — ordine de scoatere</h2>
+      <div class="field" style="margin:0"><label>Caută un produs</label>
+        <input id="fifoProd" list="prodList" placeholder="ex. Cutii carton" autocomplete="off">
+        <datalist id="prodList"></datalist>
+      </div>
+      <p class="hint" style="margin-top:8px">Îți arată din ce locație să scoți prima, după data intrării (cel mai vechi primul).</p>
+    </div>
+    <div class="card">
+      <h2>Export</h2>
+      <button class="main" id="invExport" style="background:#16a34a">Exportă inventarul în Excel</button>
+      <div class="status" id="invExpStatus"></div>
+    </div>
+  </div>
+  <div>
+    <div id="fifoResult" class="card noprint" style="display:none"></div>
+    <div class="invsearchbar noprint"><input id="invSearch" placeholder="🔎 Caută cod locație (ex. E04) — click pe cod te duce pe schemă"></div>
+    <p class="sub noprint">Toate produsele înregistrate — <span id="invSummary">0 locații, 0 produse</span>. <b>Click pe un cod = salt pe schemă.</b></p>
+    <div class="stage"><div id="invTableWrap"></div></div>
+  </div>
+</div>
+</div>
+
+<!-- ============ VIEW: SCHITA TEHNICA ============ -->
+<div id="viewTech" hidden>
+<div class="wrap">
+  <div class="controls">
+    <div class="card">
+      <h2>Raft</h2>
+      <div class="field"><label>Alege raftul</label><select id="techRack"></select>
+        <span class="hint">Dimensiunile se setează în tab-ul „Dimensiuni raft".</span></div>
+    </div>
+    <div class="card">
+      <h2>Export</h2>
+      <button class="main alt" id="tPrint">Printează</button>
+      <button class="main" id="tPdf" style="background:#7c3aed">Descarcă PDF</button>
+      <button class="main" id="tPng">Descarcă PNG</button>
+      <div class="status" id="tStatus"></div>
+    </div>
+  </div>
+  <div>
+    <p class="sub noprint">Vedere din față, vedere laterală, detaliu palet și tabel de capacități — cotate.</p>
+    <div class="stage"><div id="techDraw"></div></div>
+  </div>
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const pad=(n,d)=>String(n).padStart(d,'0');
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------- tabs ----------
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  const v=b.dataset.v;
+  $('viewSchema').hidden=v!=='schema';
+  $('viewInv').hidden=v!=='inv';
+  $('viewDim').hidden=v!=='dim';
+  $('viewTech').hidden=v!=='tech';
+  refresh();
+}));
+
+// ---------- RAFTURI (cu id stabil) ----------
+let idc=0;
+function rackTemplate(id,name,lev,pal){
+  return `<div class="rack" data-id="${id}">
+    <div class="rack-head"><b>Raft</b> <span class="cnt"></span> <button class="rmr" type="button">✕</button></div>
+    <div class="zrow">
+      <div class="field" style="margin:0"><label>Nume</label><input class="r-name" value="${name}"></div>
+      <div class="field" style="margin:0"><label>Niveluri</label><input class="r-lev" type="number" min="1" max="40" value="${lev}"></div>
+      <div class="field" style="margin:0"><label>Paleți/nivel</label><input class="r-pal" type="number" min="1" max="40" value="${pal}"></div>
+    </div>
+  </div>`;
+}
+function addRackRaw(name,lev,pal){ const id=++idc; $('racks').insertAdjacentHTML('beforeend', rackTemplate(id,name,lev,pal)); return id; }
+function addRack(name='A01',lev=4,pal=3){ addRackRaw(name,lev,pal); refresh(); }
+$('addRack').addEventListener('click', ()=>addRack('RAFT',4,3));
+$('racks').addEventListener('click', e=>{
+  if(e.target.classList.contains('rmr')){
+    if($('racks').querySelectorAll('.rack').length>1){ const id=e.target.closest('.rack').dataset.id; delete dimStore[id]; e.target.closest('.rack').remove(); }
+    else alert('Trebuie să rămână cel puțin un raft.');
+    refresh();
+  }
+});
+function readRacks(){
+  return [...$('racks').querySelectorAll('.rack')].map(r=>({
+    el:r, id:r.dataset.id, name:r.querySelector('.r-name').value.trim()||'RAFT',
+    levels:Math.max(1,+r.querySelector('.r-lev').value||1),
+    pallets:Math.max(1,+r.querySelector('.r-pal').value||1)
+  }));
+}
+function rackById(id){ return readRacks().find(r=>r.id===id); }
+function globals(){
+  return {ldig:+$('ldig').value||2,pdig:+$('pdig').value||2,sep:$('sep').value.trim()||'-',
+    lpref:$('lpref').value,ppref:$('ppref').value,base:$('base').value,pdir:$('pdir').value,mode:$('cellmode').value};
+}
+
+// ---------- DIMENSIUNI per raft ----------
+const DEF={Wb:2700,Uw:100,D:1100,Bh:120,h0:1800,hp:1600,topClear:1600,palletL:1200,palletW:800,Pf:800,Pd:1200,goodsH:1200,load:1000};
+const dimStore={};                       // id -> dims
+const DIM_IDS={Wb:'tWb',Uw:'tUw',D:'tD',Bh:'tBh',h0:'tH0',hp:'tHp',topClear:'tTop',palletL:'tPL',palletW:'tPW',Pf:'tPf',Pd:'tPd',goodsH:'tGoods',load:'tLoad'};
+function getDims(id){ return dimStore[id]?{...DEF,...dimStore[id]}:{...DEF}; }
+function readDimInputs(){ const o={}; for(const k in DIM_IDS) o[k]=+$(DIM_IDS[k]).value||DEF[k]; return o; }
+function writeDimInputs(d){ for(const k in DIM_IDS) $(DIM_IDS[k]).value=d[k]; }
+function saveDims(id){ if(id) dimStore[id]=readDimInputs(); }
+function loadDims(id){ writeDimInputs(getDims(id)); }
+
+$('dimRack').addEventListener('input', ()=>{ loadDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); });
+$('dimInputs').addEventListener('input', ()=>{ saveDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); if(typeof saveState==='function') saveState(); });
+$('applyAll').addEventListener('click', ()=>{
+  const d=readDimInputs(); readRacks().forEach(r=>dimStore[r.id]={...d});
+  if(typeof saveState==='function') saveState();
+  $('applyAll').textContent='✓ Aplicat la toate'; setTimeout(()=>$('applyAll').textContent='Aplică aceste dimensiuni la toate rafturile',1500);
+});
+
+// ---------- INVENTAR (din Excel) ----------
+let selectedCode='';
+const inventory={};                       // COD(upper) -> [{produs,cant}]
+function invByCode(code){ return inventory[code.toUpperCase()]||null; }
+function pick(o,keys){ for(const kk in o){ const low=kk.toLowerCase().replace(/\s+/g,' ').trim(); if(keys.includes(low)) return o[kk]; } return undefined; }
+function toDateStr(v){
+  if(v===undefined||v===null||v==='') return '';
+  if(v instanceof Date) return isNaN(v)?'':v.toISOString().slice(0,10);
+  if(typeof v==='number'){ const d=new Date(Math.round((v-25569)*86400*1000)); return isNaN(d)?'':d.toISOString().slice(0,10); }
+  const s=String(v).trim();
+  let m=s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/);
+  if(m){ let y=m[3]; if(y.length===2) y='20'+y; return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; }
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  return s;
+}
+function byFifo(a,b){ const da=a.data||'', db=b.data||''; if(!da&&!db) return 0; if(!da) return 1; if(!db) return -1; return da<db?-1:da>db?1:0; }
+function loadInvRows(rows){
+  for(const k in inventory) delete inventory[k];
+  let n=0;
+  rows.forEach(o=>{
+    const code=String(pick(o,['locatie','locație','locatia','location','cod locatie','cod locație'])||'').trim();
+    if(!code) return;
+    let produs=String(pick(o,['denumire produs','denumire','produs','product','articol','nume','material','descriere'])||'').trim();
+    if(!produs) produs=String(pick(o,['cod produs','cod','cod articol','sku'])||'').trim();
+    if(!produs) produs='(fără nume)';
+    const cant=+(pick(o,['cantitate','cant','bucati','bucăți','buc','qty','stoc'])||0)||0;
+    const data=toDateStr(pick(o,['data introducere bo','data creare palet','data','data intrare','data intrării','data intrarii','date','data receptie','data recepție']));
+    const key=code.toUpperCase(); (inventory[key]=inventory[key]||[]).push({produs,cant,data}); n++;
+  });
+  return n;
+}
+function occupiedCount(){
+  const g=globals(); let occ=0;
+  for(const r of readRacks()) for(let L=1;L<=r.levels;L++) for(let j=1;j<=r.pallets;j++){
+    const code=`${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(j,g.pdig)}`;
+    if(invByCode(code)) occ++;
+  }
+  return occ;
+}
+function showLoc(code){
+  selectedCode=code.toUpperCase();
+  const inv=invByCode(code), p=$('locPanel'); p.style.display='block';
+  let h=`<button class="close" title="Închide">×</button><h3>${esc(code)}</h3>`;
+  if(inv&&inv.length){
+    const list=inv.slice().sort(byFifo);
+    const total=list.reduce((a,x)=>a+(+x.cant||0),0);
+    h+=`<table><thead><tr><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>`;
+    list.forEach((x,i)=>h+=`<tr><td>${esc(x.produs)}${i===0&&x.data?'<span class="fifo-tag">scoate primul</span>':''}</td><td>${esc(x.data||'—')}</td><td class="q">${x.cant}</td><td><button class="delp" title="Șterge produsul" data-produs="${esc(x.produs)}" data-cant="${esc(String(x.cant))}" data-data="${esc(x.data||'')}">✕</button></td></tr>`);
+    h+=`<tr><td class="tot">Total</td><td></td><td class="q tot">${total}</td><td></td></tr></tbody></table>`;
+  } else h+=`<p class="empty">Locație liberă — niciun produs.</p>`;
+  p.innerHTML=h;
+  refresh();
+}
+$('schema').addEventListener('click', e=>{ const g=e.target.closest('[data-code]'); if(g) showLoc(g.getAttribute('data-code')); });
+$('locPanel').addEventListener('click', e=>{
+  if(e.target.classList.contains('close')){ $('locPanel').style.display='none'; selectedCode=''; refresh(); return; }
+  if(e.target.classList.contains('delp')){
+    const b=e.target, code=(selectedCode||'').toUpperCase(), arr=inventory[code]||[];
+    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
+    if(i>=0){ arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); showLoc(code); }
+  }
+});
+function readInvFile(file,msgId){
+  const rd=new FileReader();
+  rd.onload=e=>{ try{
+    const wb=XLSX.read(e.target.result,{type:'array'});
+    const sh=wb.Sheets['Inventar']||wb.Sheets['Inventory']||wb.Sheets[wb.SheetNames[0]];
+    const n=loadInvRows(XLSX.utils.sheet_to_json(sh));
+    const res=applySchemaFromInventory();   // potrivește schema automat (dacă e cazul)
+    if(!res) refresh();
+    pushAllInventory();
+    $(msgId).textContent = res
+      ? `Încărcat: ${n} rânduri, ${Object.keys(inventory).length} locații — schema actualizată automat.`
+      : `Încărcat: ${n} rânduri, ${Object.keys(inventory).length} locații ocupate.`;
+  }catch(err){ $(msgId).textContent='Fișier invalid.'; } };
+  rd.readAsArrayBuffer(file);
+}
+$('btnInv').addEventListener('click',()=>$('fileInv').click());
+$('fileInv').addEventListener('change',e=>{ if(e.target.files[0]) readInvFile(e.target.files[0],'invStatus'); e.target.value=''; });
+$('btnInvClear').addEventListener('click',()=>{ for(const k in inventory) delete inventory[k]; selectedCode=''; $('locPanel').style.display='none'; pushAllInventory(); refresh(); $('invStatus').textContent='Inventar șters.'; });
+$('btnInvModel').addEventListener('click',()=>{
+  const g=globals(), r=readRacks()[0];
+  const c=(L,j)=>`${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(j,g.pdig)}`;
+  const ex=[['Locatie','Produs','Cantitate','Data'],[c(1,1),'Cutii carton 40x30',120,'2026-05-10'],[c(1,1),'Folie stretch',15,'2026-06-02'],[c(1,2),'Paleti EUR',30,'2026-04-21']];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ex),'Inventar');
+  XLSX.writeFile(wb,'model_inventar.xlsx');
+});
+function applySchemaFromInventory(){
+  const codes=Object.keys(inventory).filter(k=>inventory[k]&&inventory[k].length);
+  if(!codes.length) return null;
+  const detectSep=code=>{ for(const s of ['-','/','.','_',' ']){ if(code.split(s).length>=3) return s; } return '-'; };
+  const sep=detectSep(codes[0]);
+  const need={}; let ld=1,pd=1,parsed=0;
+  codes.forEach(code=>{ const p=code.split(sep); if(p.length<3) return;
+    const name=p[0], lv=p[p.length-2], pl=p[p.length-1], ln=parseInt(lv,10), pn=parseInt(pl,10);
+    if(isNaN(ln)||isNaN(pn)) return;
+    ld=Math.max(ld,(lv.match(/\d/g)||[]).length); pd=Math.max(pd,(pl.match(/\d/g)||[]).length);
+    const m=need[name]||(need[name]={lmax:0,pmax:0}); m.lmax=Math.max(m.lmax,ln); m.pmax=Math.max(m.pmax,pn); parsed++;
+  });
+  if(!parsed) return null;   // coduri gen A01-N01-R01 → nu atingem nimic
+  $('lpref').value=''; $('ppref').value=''; $('ldig').value=ld; $('pdig').value=pd; $('sep').value=sep;
+  let added=0, extended=0;
+  const existing={}; readRacks().forEach(r=>existing[r.name.toUpperCase()]=r.el);
+  Object.keys(need).sort().forEach(name=>{ const m=need[name], key=name.toUpperCase();
+    if(existing[key]){ const el=existing[key], lvI=el.querySelector('.r-lev'), plI=el.querySelector('.r-pal');
+      const nl=Math.max(+lvI.value||1, m.lmax), np=Math.max(+plI.value||1, m.pmax);
+      if(nl!=(+lvI.value)||np!=(+plI.value)) extended++;
+      lvI.value=nl; plI.value=np;
+    } else { addRackRaw(name, Math.max(1,m.lmax), Math.max(1,m.pmax)); added++; }
+  });
+  refresh(); loadDims($('dimRack').value); pushConfig();
+  return {added,extended,parsed,racks:Object.keys(need).length};
+}
+function syncSchemaFromInventory(){
+  const res=applySchemaFromInventory();
+  if(!res){ $('invStatus').textContent='Nu ai locații cu format Raft-X-Y (ex. F05-27-04) în inventar.'; return; }
+  $('invStatus').textContent=`Gata: ${res.added} rafturi noi, ${res.extended} extinse.`;
+  document.querySelector('.tab[data-v="schema"]').click();
+}
+$('btnSyncSchema').addEventListener('click', syncSchemaFromInventory);
+
+// ---------- EDITOR inventar (tab Inventar) ----------
+function invCurrentCode(){
+  const r=rackById($('invRack').value)||readRacks()[0]; const g=globals();
+  const L=+$('invLevel').value||1, P=+$('invPallet').value||1;
+  return `${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(P,g.pdig)}`;
+}
+function syncInvSelectors(){
+  const rs=$('invRack'), prev=rs.value, racks=readRacks();
+  rs.innerHTML=racks.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
+  if([...rs.options].some(o=>o.value===prev)) rs.value=prev; else if(rs.options.length) rs.selectedIndex=0;
+  const r=rackById(rs.value)||racks[0];
+  const ls=$('invLevel'), plv=ls.value; ls.innerHTML=Array.from({length:r.levels},(_,i)=>`<option>${i+1}</option>`).join(''); if(+plv>=1&&+plv<=r.levels) ls.value=plv;
+  const ps=$('invPallet'), ppv=ps.value; ps.innerHTML=Array.from({length:r.pallets},(_,i)=>`<option>${i+1}</option>`).join(''); if(+ppv>=1&&+ppv<=r.pallets) ps.value=ppv;
+}
+function prowHtml(p){ return `<div class="prow"><input class="p-name" placeholder="Produs" value="${esc(p.produs||'')}"><input class="p-qty" type="number" min="0" placeholder="Cant." value="${p.cant===''||p.cant===undefined?'':p.cant}"><input class="p-date" type="date" title="Data intrării" value="${esc(p.data||'')}"><button class="prm" type="button" title="Șterge">✕</button></div>`; }
+function renderProdEditor(){
+  const code=invCurrentCode(); $('invCode').textContent=code;
+  const list=inventory[code.toUpperCase()]||[];
+  const rows=list.length?list:[{produs:'',cant:''}];
+  $('prodRows').innerHTML=rows.map(prowHtml).join('');
+}
+function collectProds(){
+  const code=invCurrentCode().toUpperCase(), arr=[];
+  $('prodRows').querySelectorAll('.prow').forEach(r=>{
+    const produs=r.querySelector('.p-name').value.trim(); const cant=+r.querySelector('.p-qty').value||0;
+    const data=r.querySelector('.p-date').value;
+    if(produs) arr.push({produs,cant,data});
+  });
+  if(arr.length) inventory[code]=arr; else delete inventory[code];
+  pushLoc(code, arr); saveState(); renderInvTable();
+}
+let invCodeQuery='';
+function renderInvTable(){
+  const all=Object.keys(inventory).filter(k=>inventory[k]&&inventory[k].length).sort();
+  const q=invCodeQuery.toUpperCase();
+  const codes=q?all.filter(k=>k.includes(q)):all;
+  let items=0; all.forEach(k=>items+=inventory[k].length);
+  $('invSummary').textContent=q?`${codes.length} din ${all.length} locații (filtru: ${esc(invCodeQuery)})`:`${all.length} locații, ${items} produse`;
+  updateProductList();
+  if(!codes.length){ $('invTableWrap').innerHTML='<div class="empty">'+(q?'Nicio locație cu acest cod.':'Niciun produs încă. Alege o locație și adaugă produse.')+'</div>'; return; }
+  let h='<table><thead><tr><th>Locație</th><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>';
+  codes.forEach(code=>{ inventory[code].slice().sort(byFifo).forEach((p,i)=>{
+    h+=`<tr class="${i===0?'loc':''}"><td>${i===0?`<span class="code" data-code="${esc(code)}">${esc(code)}</span>`:''}</td><td>${esc(p.produs)}</td><td>${esc(p.data||'—')}</td><td class="q">${p.cant}</td><td><button class="delp" title="Șterge produsul" data-code="${esc(code)}" data-produs="${esc(p.produs)}" data-cant="${esc(String(p.cant))}" data-data="${esc(p.data||'')}">✕</button></td></tr>`;
+  }); });
+  $('invTableWrap').innerHTML=h+'</tbody></table>';
+}
+function updateProductList(){
+  const set=new Set();
+  Object.values(inventory).forEach(arr=>arr.forEach(p=>{ if(p.produs) set.add(p.produs); }));
+  const dl=$('prodList'); if(dl) dl.innerHTML=[...set].sort().map(n=>`<option value="${esc(n)}">`).join('');
+}
+function renderFifo(query){
+  const q=(query||'').trim().toLowerCase(); const box=$('fifoResult');
+  if(!q){ box.style.display='none'; box.innerHTML=''; return; }
+  const hits=[];
+  Object.keys(inventory).forEach(code=>inventory[code].forEach(p=>{ if((p.produs||'').toLowerCase().includes(q)) hits.push({code,produs:p.produs,cant:p.cant,data:p.data}); }));
+  hits.sort(byFifo);
+  box.style.display='block';
+  if(!hits.length){ box.innerHTML=`<h3>FIFO: „${esc(query)}"</h3><p class="empty">Nu am găsit produsul în nicio locație.</p>`; return; }
+  const total=hits.reduce((a,x)=>a+(+x.cant||0),0);
+  let h=`<h3>Ordine de scoatere (FIFO)</h3><p class="sub">„${esc(query)}" — ${hits.length} loturi, total ${total} buc. Scoate de sus în jos.</p><ol>`;
+  hits.forEach((x,i)=>{ h+=`<li class="${i===0?'first':''}"><span class="code" data-code="${esc(x.code)}">${esc(x.code)}</span> — ${esc(x.produs)} · ${x.cant} buc · intrat: ${esc(x.data||'fără dată')}${i===0?' <span class="fifo-tag">scoate primul</span>':''}</li>`; });
+  box.innerHTML=h+'</ol>';
+}
+$('fifoProd').addEventListener('input', e=>renderFifo(e.target.value));
+function selectLoc(code){
+  const g=globals();
+  for(const r of readRacks()) for(let L=1;L<=r.levels;L++) for(let P=1;P<=r.pallets;P++){
+    const c=`${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(P,g.pdig)}`;
+    if(c.toUpperCase()===code.toUpperCase()){ $('invRack').value=r.id; syncInvSelectors(); $('invLevel').value=L; $('invPallet').value=P; renderProdEditor(); return; }
+  }
+}
+function cssEsc(s){ return String(s).replace(/["\\]/g,'\\$&'); }
+function goToSchema(code){
+  selectedCode=code.toUpperCase();
+  const sep=globals().sep||'-', name=(code.split(sep)[0]||'').toUpperCase();
+  const r=readRacks().find(x=>x.name.toUpperCase()===name);
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  const tab=document.querySelector('.tab[data-v="schema"]'); if(tab) tab.classList.add('active');
+  $('viewSchema').hidden=false; $('viewInv').hidden=true; $('viewDim').hidden=true; $('viewTech').hidden=true;
+  syncSchemaFilter();
+  if(r){ const sel=$('schemaRackFilter'); if(sel) sel.value=r.id; }
+  refresh();
+  setTimeout(()=>{ const el=document.querySelector('#schema g[data-code="'+cssEsc(code)+'"]'); if(el&&el.scrollIntoView) el.scrollIntoView({behavior:'smooth',block:'center',inline:'center'}); }, 90);
+}
+['invRack','invLevel','invPallet'].forEach(id=>$(id).addEventListener('input',()=>{ syncInvSelectors(); renderProdEditor(); }));
+$('addProd').addEventListener('click',()=>{ $('prodRows').insertAdjacentHTML('beforeend', prowHtml({produs:'',cant:''})); });
+$('prodRows').addEventListener('input', collectProds);
+$('prodRows').addEventListener('click', e=>{ if(e.target.classList.contains('prm')){ e.target.closest('.prow').remove(); if(!$('prodRows').querySelector('.prow')) $('prodRows').innerHTML=prowHtml({produs:'',cant:''}); collectProds(); } });
+$('invTableWrap').addEventListener('click', e=>{
+  if(e.target.classList.contains('delp')){
+    const b=e.target, code=b.dataset.code.toUpperCase(), arr=inventory[code]||[];
+    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
+    if(i>=0){ arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); renderInvTable(); }
+    return;
+  }
+  const c=e.target.closest('.code'); if(c) goToSchema(c.getAttribute('data-code'));
+});
+$('fifoResult').addEventListener('click', e=>{ const c=e.target.closest('.code'); if(c) goToSchema(c.getAttribute('data-code')); });
+$('invSearch').addEventListener('input', e=>{ invCodeQuery=e.target.value.trim(); renderInvTable(); });
+$('invExport').addEventListener('click',()=>{ try{
+  const wb=XLSX.utils.book_new(), rows=[['Locatie','Produs','Cantitate','Data']];
+  Object.keys(inventory).sort().forEach(k=>inventory[k].slice().sort(byFifo).forEach(p=>rows.push([k,p.produs,p.cant,p.data||''])));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Inventar');
+  XLSX.writeFile(wb,'inventar.xlsx'); $('invExpStatus').textContent='Exportat: inventar.xlsx';
+}catch(e){ $('invExpStatus').textContent='Eroare.'; } });
+
+// ---------- SVG schemă locații ----------
+function buildSVG(r,g){
+  const many = r.pallets>14 || r.levels>14;
+  const cellW = many?94:140, cellH = many?58:82;
+  const labelW = many?58:84, titleH=52, headH = 10, padd=18;
+  const gridW=r.pallets*cellW,gridH=r.levels*cellH;
+  const W=labelW+gridW+padd*2,H=titleH+headH+gridH+padd*2;
+  const gx=padd+labelW,gy=padd+titleH+headH;
+  const lev=L=>`${g.lpref}${pad(L,g.ldig)}`, pal=n=>`${g.ppref}${pad(n,g.pdig)}`;
+  // fonturi proporționale cu înălțimea celulei (rămân lizibile la orice mărime)
+  const numF=cellH*0.36, codeF=Math.max(8,cellH*0.165), hdrF=Math.max(9,Math.min(16,cellH*0.28)), levF=Math.max(11,Math.min(20,cellH*0.32));
+  let s=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="Arial, Helvetica, sans-serif">`;
+  s+=`<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
+  s+=`<text x="${W/2}" y="${padd+30}" text-anchor="middle" font-size="30" font-weight="800" fill="#111827">Raft ${esc(r.name)}</text>`;
+  for(let L=1;L<=r.levels;L++){const rowTop=g.base==='bottom'?(r.levels-L):(L-1);const y=gy+rowTop*cellH;
+    s+=`<text x="${padd+labelW-10}" y="${y+cellH/2+levF*0.35}" text-anchor="end" font-size="${levF}" font-weight="800" fill="#111827">${esc(lev(L))}</text>`;
+    for(let j=1;j<=r.pallets;j++){const palNo=g.pdir==='ltr'?j:(r.pallets-j+1);const x=gx+(j-1)*cellW;
+      const code=`${r.name}${g.sep}${lev(L)}${g.sep}${pal(palNo)}`;
+      const inv=invByCode(code), occ=inv&&inv.length;
+      const total=occ?inv.reduce((a,p)=>a+(+p.cant||0),0):0;
+      const sel=(code.toUpperCase()===selectedCode);
+      const fill=occ?'#dcfce7':'#f8fafc';
+      const stroke=sel?'#2563eb':(occ?'#4ade80':'#cbd5e1');
+      const sw=sel?2.5:1;
+      s+=`<g data-code="${esc(code)}" style="cursor:pointer">`;
+      if(occ) s+=`<title>${esc(code)} — ${esc(inv.map(p=>p.produs+' ×'+p.cant).join(', '))}</title>`;
+      s+=`<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+      if(g.mode==='both'){
+        s+=`<text x="${x+cellW/2}" y="${y+cellH/2+cellH*0.09}" text-anchor="middle" font-size="${Math.max(11,cellH*0.25)}" font-weight="700" fill="#0f172a">${esc(code)}</text>`;
+      }else if(g.mode==='code'){ s+=`<text x="${x+cellW/2}" y="${y+cellH/2+codeF*0.9}" text-anchor="middle" font-size="${Math.max(9,cellH*0.2)}" font-weight="700" fill="#0f172a">${esc(code)}</text>`;}
+      else{ s+=`<text x="${x+cellW/2}" y="${y+cellH/2+cellH*0.15}" text-anchor="middle" font-size="${cellH*0.42}" font-weight="800" fill="#0f172a">${esc(pal(palNo))}</text>`;}
+      if(occ){ const bw=Math.max(20,cellW*0.22), bh=Math.max(14,cellH*0.24);
+        s+=`<rect x="${x+cellW-bw-4}" y="${y+4}" width="${bw}" height="${bh}" rx="${bh/2}" fill="#16a34a"/>`;
+        s+=`<text x="${x+cellW-bw/2-4}" y="${y+4+bh*0.74}" text-anchor="middle" font-size="${Math.max(9,bh*0.6)}" font-weight="700" fill="#fff">${total}</text>`;}
+      s+=`</g>`;
+    }
+  }
+  const fx=gx-6,fw=gridW+12;
+  s+=`<rect x="${fx}" y="${gy-6}" width="${fw}" height="${gridH+12}" fill="none" stroke="#334155" stroke-width="6"/>`;
+  s+=`<rect x="${fx}" y="${gy-6}" width="8" height="${gridH+12}" fill="#334155"/>`;
+  s+=`<rect x="${fx+fw-8}" y="${gy-6}" width="8" height="${gridH+12}" fill="#334155"/>`;
+  for(let L=0;L<=r.levels;L++){const yy=gy+L*cellH;s+=`<rect x="${fx}" y="${yy-3}" width="${fw}" height="6" fill="#e28413"/>`;}
+  s+=`</svg>`; return {svg:s,W,H};
+}
+
+// ---------- SVG schiță tehnică ----------
+function techConfig(id){
+  const r=rackById(id)||readRacks()[0]; const d=getDims(r.id);
+  return {name:r.name,N:r.levels,P:r.pallets,...d};
+}
+function buildTech(t){
+  const heights=[]; for(let i=1;i<=t.N;i++) heights.push(t.h0+(i-1)*t.hp);
+  const Htot=heights[t.N-1]+t.topClear;
+  const frontWmm=2*t.Uw+t.Wb, sideWmm=t.D;
+  const ML=95,MT=115,MR=45,GAP=110,MB=80,DETAIL=260;
+  let S=Math.min(560/Htot,(940-GAP)/(frontWmm+sideWmm),0.16);
+  const frontWpx=frontWmm*S,sideWpx=sideWmm*S,Hpx=Htot*S;
+  let W=ML+frontWpx+GAP+sideWpx+MR;
+  const H=MT+Hpx+MB+DETAIL;
+  const tblW=210+150; W=Math.max(W,(ML+frontWpx+GAP)+tblW+MR);
+  const floorY=MT+Hpx, fx=ML, sx=ML+frontWpx+GAP, PY=mm=>floorY-mm*S;
+  const R=(x,y,w,h,f,st,sw)=>`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${f}" ${st?`stroke="${st}" stroke-width="${sw||1}"`:''}/>`;
+  const T=(x,y,tx,sz,an,w,fill)=>`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${sz}" text-anchor="${an||'middle'}" ${w?`font-weight="${w}"`:''} fill="${fill||'#111'}">${esc(tx)}</text>`;
+  const L=(x1,y1,x2,y2,st,sw)=>`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${st||'#444'}" stroke-width="${sw||1}"/>`;
+  const DIMC='#2563eb';
+  const hdim=(x1,x2,y,label)=>L(x1,y-4,x1,y+4,DIMC,1)+L(x2,y-4,x2,y+4,DIMC,1)+L(x1,y,x2,y,DIMC,1)+T((x1+x2)/2,y-6,label,12,'middle',700,DIMC);
+  const vdim=(y1,y2,x,label)=>{const ym=(y1+y2)/2;return L(x-4,y1,x+4,y1,DIMC,1)+L(x-4,y2,x+4,y2,DIMC,1)+L(x,y1,x,y2,DIMC,1)+`<text transform="rotate(-90 ${x-6} ${ym})" x="${(x-6).toFixed(1)}" y="${ym.toFixed(1)}" font-size="12" text-anchor="middle" font-weight="700" fill="${DIMC}">${esc(label)}</text>`;};
+  let s=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W.toFixed(0)} ${H.toFixed(0)}" font-family="Arial, Helvetica, sans-serif">`;
+  s+=`<rect width="${W}" height="${H}" fill="#fff"/>`;
+  s+=T(ML,32,`Schiță tehnică — Raft ${t.name}`,22,'start',800,'#111');
+  s+=T(ML,52,`Cote în mm · scara aprox. 1:${Math.round(1/S)}`,12,'start',400,'#6b7280');
+  s+=T(fx+frontWpx/2,78,'VEDERE DIN FAȚĂ',13,'middle',700,'#334155');
+  s+=T(sx+sideWpx/2,78,'VEDERE LATERALĂ',13,'middle',700,'#334155');
+  s+=L(fx-30,floorY,fx+frontWpx+30,floorY,'#111',2);
+  s+=R(fx,PY(Htot),t.Uw*S,Htot*S,'#334155');
+  s+=R(fx+(t.Uw+t.Wb)*S,PY(Htot),t.Uw*S,Htot*S,'#334155');
+  const opX0=fx+t.Uw*S,opW=t.Wb*S;
+  for(let i=0;i<t.N;i++){const hy=PY(heights[i]);
+    s+=R(opX0,hy-t.Bh*S,opW,t.Bh*S,'#e28413','#b45309',0.5);
+    const pw=t.Pf*S,gapp=(opW-t.P*pw)/(t.P+1);
+    for(let k=0;k<t.P;k++){const px=opX0+gapp*(k+1)+pw*k,deck=90*S;
+      s+=R(px,hy-t.Bh*S-t.goodsH*S-deck,pw,t.goodsH*S,'#dbeafe','#93c5fd',0.5);
+      s+=R(px,hy-t.Bh*S-deck,pw,deck,'#a8825a','#6b4f2a',0.5);}}
+  s+=vdim(PY(Htot),floorY,fx-40,`${Math.round(Htot)}`);
+  s+=vdim(floorY,PY(t.h0),fx-16,`${Math.round(t.h0)}`);
+  for(let i=1;i<t.N;i++) s+=vdim(PY(heights[i-1]),PY(heights[i]),fx-16,`${Math.round(t.hp)}`);
+  s+=hdim(opX0,opX0+opW,PY(Htot)-16,`${Math.round(t.Wb)}`);
+  {const pw=t.Pf*S,gapp=(opW-t.P*pw)/(t.P+1),px=opX0+gapp;s+=hdim(px,px+pw,floorY+22,`${Math.round(t.Pf)}`);}
+  s+=L(sx-20,floorY,sx+sideWpx+20,floorY,'#111',2);
+  s+=R(sx,PY(Htot),t.Uw*S,Htot*S,'#334155');
+  s+=R(sx+t.D*S-t.Uw*S,PY(Htot),t.Uw*S,Htot*S,'#334155');
+  for(let i=0;i<t.N-1;i++) s+=L(sx+t.Uw*S,PY(heights[i]),sx+t.D*S-t.Uw*S,PY(heights[i+1]),'#64748b',1.2);
+  for(let i=0;i<t.N;i++){const hy=PY(heights[i]);
+    s+=R(sx+t.Uw*S*0.2,hy-t.Bh*S,t.Bh*S,t.Bh*S,'#e28413','#b45309',0.5);
+    s+=R(sx+t.D*S-t.Uw*S*0.2-t.Bh*S,hy-t.Bh*S,t.Bh*S,t.Bh*S,'#e28413','#b45309',0.5);
+    const pdpx=t.Pd*S,cx=sx+(t.D*S-pdpx)/2,deck=90*S;
+    s+=R(cx,hy-t.Bh*S-t.goodsH*S-deck,pdpx,t.goodsH*S,'#dbeafe','#93c5fd',0.5);
+    s+=R(cx,hy-t.Bh*S-deck,pdpx,deck,'#a8825a','#6b4f2a',0.5);}
+  s+=hdim(sx,sx+t.D*S,PY(Htot)-16,`${Math.round(t.D)}`);
+  s+=vdim(PY(Htot),floorY,sx+sideWpx+26,`${Math.round(Htot)}`);
+  const dY=floorY+MB+40;
+  s+=T(fx,dY-26,'DETALIU PALET',13,'start',700,'#334155');
+  const ds=Math.min(150/t.palletL,150/t.palletW,0.12),plw=t.palletL*ds,plh=t.palletW*ds,dx=fx+10;
+  s+=R(dx,dY,plw,plh,'#f5e9d8','#8a6a3a',1.2);
+  for(let k=1;k<3;k++) s+=L(dx,dY+plh*k/3,dx+plw,dY+plh*k/3,'#8a6a3a',0.6);
+  s+=hdim(dx,dx+plw,dY-8,`${t.palletL}`);
+  s+=vdim(dY,dY+plh,dx-8,`${t.palletW}`);
+  s+=T(dx+plw+16,dY+plh/2,`Palet ${t.palletL}×${t.palletW} mm`,12,'start',400,'#475569');
+  const tx=sx,tY=floorY+MB+40,rowH=26,colW=[210,150],tw=colW[0]+colW[1];
+  s+=T(tx,tY-26,'CAPACITĂȚI',13,'start',700,'#334155');
+  const rows=[['Număr niveluri',`${t.N}`],['Paleți / nivel',`${t.P}`],['Total locații palet',`${t.N*t.P}`],
+    ['Sarcină / nivel (pereche grinzi)',`${t.load} kg`],['Sarcină totală raft',`${t.load*t.N} kg`],
+    ['Gabarit (L×A×Î)',`${Math.round(frontWmm)}×${t.D}×${Math.round(Htot)}`]];
+  s+=R(tx,tY,tw,rowH*rows.length,'#fff','#cbd5e1',1);
+  rows.forEach((r,i)=>{const yy=tY+i*rowH; if(i%2) s+=R(tx,yy,tw,rowH,'#f8fafc','',0);
+    s+=L(tx,yy,tx+tw,yy,'#e2e8f0',0.8);
+    s+=T(tx+8,yy+17,r[0],12,'start',400,'#334155');
+    s+=T(tx+colW[0]+8,yy+17,r[1],12,'start',700,'#0f172a');});
+  s+=L(tx+colW[0],tY,tx+colW[0],tY+rowH*rows.length,'#cbd5e1',1);
+  s+=`</svg>`; return {svg:s,W,H};
+}
+
+// ---------- selectors + refresh ----------
+function syncSelect(sel){
+  const prev=sel.value, racks=readRacks();
+  sel.innerHTML=racks.map(r=>`<option value="${r.id}">${esc(r.name)} — ${r.levels} niv × ${r.pallets} pal</option>`).join('');
+  if([...sel.options].some(o=>o.value===prev)) sel.value=prev; else if(sel.options.length) sel.selectedIndex=0;
+}
+function drawDim(){ const id=$('dimRack').value; if(id) $('dimPreview').innerHTML=buildTech(techConfig(id)).svg; }
+let schemaFilterInit=false;
+function syncSchemaFilter(){
+  const sel=$('schemaRackFilter'); if(!sel) return; const prev=sel.value, rs=readRacks();
+  sel.innerHTML='<option value="all">Toate rafturile</option>'+rs.map(r=>`<option value="${r.id}">Raft ${esc(r.name)}</option>`).join('');
+  if(!schemaFilterInit && rs.length){ sel.value=rs[0].id; schemaFilterInit=true; }
+  else if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
+  else sel.value='all';
+}
+function schemaHTML(){
+  const g=globals(), rs=readRacks(), f=$('schemaRackFilter')?$('schemaRackFilter').value:'all';
+  const shown=(f==='all')?rs:rs.filter(r=>r.id===f);
+  return shown.map(r=>`<div class="rack-svg">${buildSVG(r,g).svg}</div>`).join('');
+}
+function refresh(){
+  const g=globals(),racks=readRacks();
+  let tot=0;
+  for(const r of racks){const c=r.levels*r.pallets;tot+=c;r.el.querySelector('.cnt').textContent=`${c} poziții`;}
+  $('tot').textContent=tot.toLocaleString('ro-RO'); $('nr').textContent=racks.length;
+  $('occ').textContent=Object.keys(inventory).length?occupiedCount().toLocaleString('ro-RO'):'0';
+  syncSchemaFilter();
+  $('schema').innerHTML=schemaHTML(); applyZoom();
+  syncSelect($('dimRack')); syncSelect($('techRack')); syncInvSelectors();
+  if(!$('viewDim').hidden) drawDim();
+  if(!$('viewInv').hidden){ renderProdEditor(); renderInvTable(); }
+  if(!$('viewTech').hidden) $('techDraw').innerHTML=buildTech(techConfig($('techRack').value)).svg;
+  if(typeof saveState==='function') saveState();
+}
+document.addEventListener('input', e=>{ if(e.target.closest('#dimInputs')||e.target.closest('#prodRows')||e.target.closest('#zoombar')||e.target.id==='fifoProd'||e.target.id==='invSearch') return; refresh(); });
+
+// ---------- export ----------
+function svgToCanvas(svg,W,H,scale){
+  return new Promise((resolve,reject)=>{
+    const img=new Image(), url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
+    img.onload=()=>{const cv=document.createElement('canvas');cv.width=W*scale;cv.height=H*scale;
+      const ctx=cv.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);
+      ctx.drawImage(img,0,0,cv.width,cv.height);URL.revokeObjectURL(url);resolve(cv);};
+    img.onerror=e=>{URL.revokeObjectURL(url);reject(e);};img.src=url;});
+}
+function pdfFromItems(items,fname,status){
+  const {jsPDF}=window.jspdf; let doc=null;
+  for(const it of items){const land=it.W>=it.H;
+    if(!doc) doc=new jsPDF({unit:'mm',format:'a4',orientation:land?'landscape':'portrait'});
+    else doc.addPage('a4',land?'landscape':'portrait');
+    const pw=doc.internal.pageSize.getWidth(),ph=doc.internal.pageSize.getHeight(),m=10;
+    const rr=Math.min((pw-2*m)/it.W,(ph-2*m)/it.H),w=it.W*rr,h=it.H*rr;
+    doc.addImage(it.cv.toDataURL('image/png'),'PNG',(pw-w)/2,(ph-h)/2,w,h);}
+  doc.save(fname); if(status)$(status).textContent='PDF descărcat.';
+}
+$('btnPdf').addEventListener('click', async ()=>{ $('status').textContent='Se creează PDF...';
+  try{const g=globals(),racks=readRacks(),items=[];
+    for(const r of racks){const {svg,W,H}=buildSVG(r,g);items.push({cv:await svgToCanvas(svg,W,H,2),W,H});}
+    pdfFromItems(items,'scheme_rafturi.pdf','status');}catch(e){$('status').textContent='Eroare la PDF.';}});
+$('btnPng').addEventListener('click', async ()=>{ $('status').textContent='Se creează PNG...';
+  try{const g=globals(),racks=readRacks(),scale=2,gap=30,parts=[];
+    for(const r of racks){const {svg,W,H}=buildSVG(r,g);parts.push({cv:await svgToCanvas(svg,W,H,scale),W:W*scale,H:H*scale});}
+    const totW=Math.max(...parts.map(p=>p.W)),totH=parts.reduce((a,p)=>a+p.H,0)+gap*(parts.length-1);
+    const out=document.createElement('canvas');out.width=totW;out.height=totH;
+    const ctx=out.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,totW,totH);
+    let y=0;for(const p of parts){ctx.drawImage(p.cv,(totW-p.W)/2,y);y+=p.H+gap;}
+    const a=document.createElement('a');a.download='scheme_rafturi.png';a.href=out.toDataURL('image/png');a.click();
+    $('status').textContent='PNG descărcat.';}catch(e){$('status').textContent='Eroare la PNG.';}});
+$('btnPrint').addEventListener('click', ()=>{document.querySelector('.tab[data-v=schema]').click();window.print();});
+
+$('tPdf').addEventListener('click', async ()=>{ $('tStatus').textContent='Se creează PDF...';
+  try{const cfg=techConfig($('techRack').value),{svg,W,H}=buildTech(cfg);const cv=await svgToCanvas(svg,W,H,2);
+    pdfFromItems([{cv,W,H}],`schita_tehnica_${cfg.name}.pdf`,'tStatus');}catch(e){$('tStatus').textContent='Eroare la PDF.';}});
+$('tPng').addEventListener('click', async ()=>{ $('tStatus').textContent='Se creează PNG...';
+  try{const cfg=techConfig($('techRack').value),{svg,W,H}=buildTech(cfg);const cv=await svgToCanvas(svg,W,H,2);
+    const a=document.createElement('a');a.download=`schita_tehnica_${cfg.name}.png`;a.href=cv.toDataURL('image/png');a.click();
+    $('tStatus').textContent='PNG descărcat.';}catch(e){$('tStatus').textContent='Eroare la PNG.';}});
+$('tPrint').addEventListener('click', ()=>window.print());
+
+// ---------- Excel salvare / incarcare ----------
+function exportExcel(){
+  try{
+    const wb=XLSX.utils.book_new(), racks=readRacks();
+    const rk=[['Nume','Niveluri','Paleti']]; racks.forEach(r=>rk.push([r.name,r.levels,r.pallets]));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rk),'Rafturi');
+    const dh=['Raft','Wb','Uw','D','Bh','h0','hp','topClear','palletL','palletW','Pf','Pd','goodsH','load'];
+    const dm=[dh]; racks.forEach(r=>{const d=getDims(r.id);dm.push([r.name,d.Wb,d.Uw,d.D,d.Bh,d.h0,d.hp,d.topClear,d.palletL,d.palletW,d.Pf,d.Pd,d.goodsH,d.load]);});
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(dm),'Dimensiuni');
+    const g=globals(), st=[['Cheie','Valoare'],['lpref',g.lpref],['ppref',g.ppref],['ldig',g.ldig],['pdig',g.pdig],['sep',g.sep],['base',g.base],['pdir',g.pdir],['mode',g.mode]];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(st),'Setari');
+    const invRows=[['Locatie','Produs','Cantitate','Data']];
+    for(const k in inventory) inventory[k].forEach(x=>invRows.push([k,x.produs,x.cant,x.data||'']));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(invRows),'Inventar');
+    XLSX.writeFile(wb,'config_rafturi.xlsx');
+    $('ioStatus').textContent='Salvat: config_rafturi.xlsx';
+  }catch(e){ $('ioStatus').textContent='Eroare la salvare.'; }
+}
+function importExcel(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const rkSheet=wb.Sheets['Rafturi']; if(!rkSheet){alert('Fișierul nu are foaia „Rafturi".');return;}
+      const rows=XLSX.utils.sheet_to_json(rkSheet,{header:1}).slice(1).filter(r=>r&&r[0]!==undefined&&String(r[0]).trim()!=='');
+      const dimMap={}; const dSheet=wb.Sheets['Dimensiuni'];
+      if(dSheet) XLSX.utils.sheet_to_json(dSheet).forEach(o=>{dimMap[String(o.Raft)]={Wb:+o.Wb,Uw:+o.Uw,D:+o.D,Bh:+o.Bh,h0:+o.h0,hp:+o.hp,topClear:+o.topClear,palletL:+o.palletL,palletW:+o.palletW,Pf:+o.Pf,Pd:+o.Pd,goodsH:+o.goodsH,load:+o.load};});
+      const sSheet=wb.Sheets['Setari'];
+      if(sSheet){ const map={}; XLSX.utils.sheet_to_json(sSheet).forEach(o=>map[o.Cheie]=o.Valoare);
+        const set=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
+        set('lpref',map.lpref);set('ppref',map.ppref);set('ldig',map.ldig);set('pdig',map.pdig);
+        set('sep',map.sep);set('base',map.base);set('pdir',map.pdir);set('cellmode',map.mode);
+      }
+      $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
+      const list=rows.length?rows:[['A01',4,3]];
+      list.forEach(r=>{ const name=String(r[0]).trim(), lev=+r[1]||1, pal=+r[2]||1; const id=addRackRaw(name,lev,pal); if(dimMap[name]) dimStore[id]={...DEF,...dimMap[name]}; });
+      if(wb.Sheets['Inventar']) loadInvRows(XLSX.utils.sheet_to_json(wb.Sheets['Inventar']));
+      refresh(); loadDims($('dimRack').value); pushConfig(); pushAllInventory();
+      $('ioStatus').textContent=`Încărcat: ${list.length} rafturi.`;
+    }catch(err){ $('ioStatus').textContent='Fișier invalid.'; }
+  };
+  reader.readAsArrayBuffer(file);
+}
+$('btnSave').addEventListener('click', exportExcel);
+$('btnLoad').addEventListener('click', ()=>$('fileXlsx').click());
+$('fileXlsx').addEventListener('change', e=>{ if(e.target.files[0]) importExcel(e.target.files[0]); e.target.value=''; });
+
+// --- import config rafturi (Excel simplu: Nume, Nivele, Rand) ---
+function readRackCfg(file){
+  const rd=new FileReader();
+  rd.onload=e=>{ try{
+    const wb=XLSX.read(e.target.result,{type:'array'});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false});
+    if(!rows.length){ $('rackCfgStatus').textContent='Fișier gol.'; return; }
+    const hdr=rows[0].map(x=>String(x==null?'':x).toLowerCase().replace(/\s+/g,' ').trim());
+    let nivIdx=hdr.findIndex(h=>/nivel/.test(h));
+    let randIdx=hdr.findIndex(h=>/r[aâ]nd|palet|coloan/.test(h));
+    let nameIdx=hdr.findIndex(h=>/nume|raft|cod|locat/.test(h));
+    if(nivIdx<0) nivIdx=1; if(randIdx<0) randIdx=2;
+    if(nameIdx<0){ nameIdx=[0,1,2].find(i=>i!==nivIdx&&i!==randIdx); if(nameIdx===undefined) nameIdx=0; }
+    const hasHeader=/nivel/.test(hdr[nivIdx]||'')||/r[aâ]nd|palet/.test(hdr[randIdx]||'')||String(rows[0][nameIdx]||'').trim()==='';
+    const data=hasHeader?rows.slice(1):rows;
+    const list=[];
+    data.forEach(r=>{ const name=String(r[nameIdx]==null?'':r[nameIdx]).trim(); if(!name) return;
+      list.push({name, lev:Math.max(1,parseInt(r[nivIdx],10)||1), pal:Math.max(1,parseInt(r[randIdx],10)||1)}); });
+    if(!list.length){ $('rackCfgStatus').textContent='Nu am găsit rafturi. Coloane: Nume, Nivele, Rand.'; return; }
+    if(!confirm(`Încarc ${list.length} rafturi din config. Rafturile actuale vor fi înlocuite cu cele din fișier. Continui?`)) return;
+    $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
+    list.forEach(r=>addRackRaw(r.name,r.lev,r.pal));
+    refresh(); loadDims($('dimRack').value); pushConfig();
+    $('rackCfgStatus').textContent=`Încărcat: ${list.length} rafturi din config.`;
+  }catch(err){ $('rackCfgStatus').textContent='Fișier invalid.'; } };
+  rd.readAsArrayBuffer(file);
+}
+$('btnRackCfg').addEventListener('click',()=>$('fileRackCfg').click());
+$('fileRackCfg').addEventListener('change', e=>{ if(e.target.files[0]) readRackCfg(e.target.files[0]); e.target.value=''; });
+$('btnRackCfgModel').addEventListener('click',()=>{
+  const wb=XLSX.utils.book_new();
+  const ex=[['Nume','Nivele','Rand'],['A01',4,19],['A02',4,41],['B01',4,20],['C03',4,9]];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ex),'Config');
+  XLSX.writeFile(wb,'model_config_rafturi.xlsx');
+});
+
+// ---------- Zoom schemă ----------
+let schemaZoom=1;
+function applyZoom(){
+  document.querySelectorAll('#schema svg').forEach(svg=>{ const vb=svg.viewBox.baseVal; if(vb&&vb.width){ svg.style.width=(vb.width*schemaZoom)+'px'; svg.style.height='auto'; } });
+  const z=$('zVal'); if(z) z.textContent=Math.round(schemaZoom*100)+'%';
+  const zr=$('zoom'); if(zr) zr.value=Math.round(schemaZoom*100);
+}
+function fitZoom(){
+  const stage=document.querySelector('#viewSchema .stage'), svgs=[...document.querySelectorAll('#schema svg')];
+  if(!svgs.length||!stage) return; let maxW=0; svgs.forEach(s=>{const vb=s.viewBox.baseVal; if(vb) maxW=Math.max(maxW,vb.width);});
+  if(maxW>0){ schemaZoom=Math.max(0.2,Math.min(2,(stage.clientWidth-40)/maxW)); applyZoom(); }
+}
+$('zoom').addEventListener('input',()=>{ schemaZoom=+$('zoom').value/100; applyZoom(); });
+$('zIn').addEventListener('click',()=>{ schemaZoom=Math.min(2,schemaZoom+0.1); applyZoom(); });
+$('zOut').addEventListener('click',()=>{ schemaZoom=Math.max(0.25,schemaZoom-0.1); applyZoom(); });
+$('zFit').addEventListener('click', fitZoom);
+
+// ---------- Persistență + sincronizare cu serverul ----------
+const KEY='schemaRaft_v1';
+const SERVER = location.protocol.startsWith('http');   // servit de serverul local?
+function currentState(){ return { racks:readRacks().map(r=>({name:r.name,levels:r.levels,pallets:r.pallets,dims:getDims(r.id)})), g:globals(), inv:inventory }; }
+function applyState(st){
+  const g=st.g||{}, setv=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
+  setv('lpref',g.lpref);setv('ppref',g.ppref);setv('ldig',g.ldig);setv('pdig',g.pdig);
+  setv('sep',g.sep);setv('base',g.base);setv('pdir',g.pdir);setv('cellmode',g.mode);
+  $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
+  const racks=(st.racks&&st.racks.length)?st.racks:[{name:'A01',levels:4,pallets:3},{name:'A02',levels:4,pallets:3}];
+  racks.forEach(r=>{ const id=addRackRaw(r.name,r.levels,r.pallets); if(r.dims) dimStore[id]={...DEF,...r.dims}; });
+  for(const k in inventory) delete inventory[k];
+  const inv=st.inv||{}; Object.keys(inv).forEach(k=>inventory[k.toUpperCase()]=inv[k]);
+  refresh(); loadDims($('dimRack').value); return true;
+}
+function saveState(){ try{ localStorage.setItem(KEY, JSON.stringify(currentState())); }catch(e){} pushConfig(); }
+function restoreState(){ try{
+  const raw=localStorage.getItem(KEY); if(!raw) return false;
+  const st=JSON.parse(raw); if(!st||!st.racks||!st.racks.length) return false;
+  return applyState(st);
+}catch(e){ return false; } }
+
+// --- rețea (activ doar când e servit de server) ---
+function api(method,p,body){ return fetch(p,{method,headers:{'Content-Type':'application/json'},body:body!==undefined?JSON.stringify(body):undefined}); }
+let cfgTimer;
+function pushConfig(){ if(!SERVER) return; clearTimeout(cfgTimer); cfgTimer=setTimeout(()=>{ api('PUT','/api/config',{racks:currentState().racks,g:globals()}).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); },600); }
+function pushLoc(code,arr){ if(!SERVER) return; api('PUT','/api/inventory/'+encodeURIComponent(code),arr||[]).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); }
+function pushAllInventory(){ if(!SERVER) return; api('PUT','/api/inventory',inventory).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); }
+function setSyncBadge(ok){ const b=$('syncBadge'); if(!b) return;
+  if(!SERVER){ b.className='badge local'; b.textContent='● Local (pe acest calculator)'; return; }
+  b.className='badge '+(ok?'on':'off'); b.textContent=ok?'● Conectat la server (partajat cu colegii)':'● Server indisponibil'; }
+let pollTimer;
+function startPolling(){ clearInterval(pollTimer); pollTimer=setInterval(async ()=>{
+  try{ const inv=await (await fetch('/api/inventory')).json();
+    const cur=JSON.stringify(Object.keys(inventory).sort().reduce((a,k)=>{a[k]=inventory[k];return a;},{}));
+    const nw=JSON.stringify(Object.keys(inv).sort().reduce((a,k)=>{a[k.toUpperCase()]=inv[k];return a;},{}));
+    if(nw!==cur){
+      for(const k in inventory) delete inventory[k];
+      Object.keys(inv).forEach(k=>inventory[k.toUpperCase()]=inv[k]);
+      if(!$('viewSchema').hidden){ $('schema').innerHTML=schemaHTML(); $('occ').textContent=Object.keys(inventory).length?occupiedCount():'0'; applyZoom(); }
+      if(!$('viewInv').hidden){ renderInvTable(); if(!(document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#prodRows'))) renderProdEditor(); }
+    }
+    setSyncBadge(true);
+  }catch(e){ setSyncBadge(false); }
+}, 5000); }
+
+$('btnReset').addEventListener('click', ()=>{
+  if(!confirm('Ștergi datele salvate local și revii la starea inițială?')) return;
+  try{ localStorage.removeItem(KEY); }catch(e){}
+  location.reload();
+});
+
+// init
+async function initApp(){
+  if(SERVER){
+    try{
+      const st=await (await fetch('/api/data')).json();
+      const has=(st.racks&&st.racks.length)||Object.keys(st.inv||{}).length;
+      if(has) applyState(st);
+      else { if(!restoreState()){ addRack('A01',4,3); addRack('A02',4,3); loadDims($('dimRack').value); } pushConfig(); pushAllInventory(); }
+      setSyncBadge(true); startPolling();
+    }catch(e){ setSyncBadge(false); if(!restoreState()){ addRack('A01',4,3); addRack('A02',4,3); loadDims($('dimRack').value); } }
+  } else {
+    setSyncBadge(false);
+    if(!restoreState()){ addRack('A01',4,3); addRack('A02',4,3); loadDims($('dimRack').value); }
+  }
+}
+initApp();
+</script>
+</body>
+</html>
