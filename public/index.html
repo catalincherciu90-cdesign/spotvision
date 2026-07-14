@@ -115,7 +115,32 @@
     <button class="tab" data-v="tech">Schiță tehnică</button>
   </div>
   <div id="syncBadge" class="badge">—</div>
+  <div id="authBar" style="position:absolute;top:12px;right:14px;font-size:13px;color:#64748b;display:none;align-items:center;gap:10px">
+    <span>cont: <b id="authUser" style="color:#334155"></b></span>
+    <a href="#" id="btnUsers" style="color:#0ea5e9;text-decoration:none">Utilizatori</a>
+    <a href="#" id="btnLogout" style="color:#0ea5e9;text-decoration:none">Ieșire</a>
+  </div>
 </header>
+
+<!-- ============ MODAL UTILIZATORI ============ -->
+<div id="usersModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h2 style="margin:0;font-size:18px">Utilizatori</h2>
+      <a href="#" id="usersClose" style="color:#64748b;text-decoration:none;font-size:22px;line-height:1">×</a>
+    </div>
+    <p style="margin:0 0 14px;color:#64748b;font-size:13px">Adaugă colegi sau șterge conturi. Fiecare intră cu id-ul și parola lui.</p>
+    <div id="usersList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px"></div>
+    <div style="border-top:1px solid #e2e8f0;padding-top:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="newUid" placeholder="id coleg nou" style="flex:1;min-width:120px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px">
+        <input id="newPwd" type="password" placeholder="parolă" style="flex:1;min-width:120px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px">
+      </div>
+      <button id="addUser" class="main" style="margin-top:10px">Adaugă cont</button>
+      <div id="usersErr" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:16px"></div>
+    </div>
+  </div>
+</div>
 
 <!-- ============ VIEW: SCHEMA LOCATII ============ -->
 <div id="viewSchema">
@@ -991,6 +1016,84 @@ async function initApp(){
   }
 }
 initApp();
+</script>
+
+<!-- ============ AUTENTIFICARE (login/logout/utilizatori) ============ -->
+<script>
+(function(){
+  // daca o cerere API intoarce 401 (sesiune expirata) -> inapoi la login
+  const _fetch = window.fetch.bind(window);
+  window.fetch = (...a) => _fetch(...a).then(r => {
+    try{ const u = typeof a[0]==='string'?a[0]:(a[0]&&a[0].url)||''; if(r.status===401 && u.indexOf('/api/')===0) location.href='/'; }catch(e){}
+    return r;
+  });
+
+  const $ = id => document.getElementById(id);
+  const bar = $('authBar');
+
+  async function initAuth(){
+    try{
+      const st = await (await fetch('/api/auth-status')).json();
+      if(st && st.authenticated){
+        $('authUser').textContent = st.id || '';
+        bar.style.display = 'flex';
+      }
+    }catch(e){}
+  }
+  initAuth();
+
+  $('btnLogout').addEventListener('click', async (e)=>{
+    e.preventDefault();
+    try{ await fetch('/api/logout',{method:'POST'}); }catch(ex){}
+    location.href='/';
+  });
+
+  // ---- modal utilizatori ----
+  const modal = $('usersModal');
+  function openUsers(){ modal.style.display='flex'; loadUsers(); }
+  function closeUsers(){ modal.style.display='none'; $('usersErr').textContent=''; }
+  $('btnUsers').addEventListener('click', e=>{ e.preventDefault(); openUsers(); });
+  $('usersClose').addEventListener('click', e=>{ e.preventDefault(); closeUsers(); });
+  modal.addEventListener('click', e=>{ if(e.target===modal) closeUsers(); });
+
+  async function loadUsers(){
+    const list = $('usersList'); list.innerHTML = 'Se încarcă…';
+    try{
+      const d = await (await fetch('/api/users')).json();
+      const me = d.me;
+      list.innerHTML = '';
+      (d.users||[]).forEach(u=>{
+        const row = document.createElement('div');
+        row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px';
+        const label = u.id + (u.id===me ? ' (tu)' : '');
+        row.innerHTML = '<span>'+label.replace(/</g,'&lt;')+'</span>';
+        const del = document.createElement('a');
+        del.href='#'; del.textContent='șterge'; del.style.cssText='color:#dc2626;text-decoration:none;font-size:13px';
+        del.addEventListener('click', async ev=>{
+          ev.preventDefault();
+          if(!confirm('Ștergi contul „'+u.id+'”?')) return;
+          const r = await fetch('/api/users/'+encodeURIComponent(u.id),{method:'DELETE'});
+          const rd = await r.json().catch(()=>({}));
+          if(!r.ok){ $('usersErr').textContent = rd.error||'Eroare la ștergere.'; return; }
+          if(u.id===me){ location.href='/'; return; }
+          loadUsers();
+        });
+        row.appendChild(del); list.appendChild(row);
+      });
+      if(!(d.users||[]).length) list.textContent='Niciun utilizator.';
+    }catch(e){ list.textContent='Eroare la încărcare.'; }
+  }
+
+  $('addUser').addEventListener('click', async ()=>{
+    const err = $('usersErr'); err.textContent='';
+    const id = $('newUid').value.trim(), password = $('newPwd').value;
+    if(!id || !password){ err.textContent='Completează id și parolă.'; return; }
+    const r = await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ err.textContent = d.error||'Eroare.'; return; }
+    $('newUid').value=''; $('newPwd').value=''; loadUsers();
+  });
+})();
 </script>
 </body>
 </html>
