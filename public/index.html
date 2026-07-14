@@ -491,12 +491,12 @@ function readInvFile(file,msgId){
     const wb=XLSX.read(e.target.result,{type:'array'});
     const sh=wb.Sheets['Inventar']||wb.Sheets['Inventory']||wb.Sheets[wb.SheetNames[0]];
     const n=loadInvRows(XLSX.utils.sheet_to_json(sh));
-    const res=applySchemaFromInventory();   // potrivește schema automat (dacă e cazul)
-    if(!res) refresh();
-    pushAllInventory();
-    $(msgId).textContent = res
-      ? `Încărcat: ${n} rânduri, ${Object.keys(inventory).length} locații — schema actualizată automat.`
-      : `Încărcat: ${n} rânduri, ${Object.keys(inventory).length} locații ocupate.`;
+    const res=applySchemaFromInventory();   // construiește/potrivește schema + normalizează codurile
+    if(!res){ refresh(); pushAllInventory(); }
+    const loc=Object.keys(inventory).length;
+    let msg=`Încărcat: ${n} rânduri, ${loc} locații — schema actualizată automat.`;
+    if(res && res.unmatched>0) msg+=` ⚠️ ${res.unmatched} locații cu cod necunoscut (nu apar pe schemă) — verifică formatul coloanei „Locatie" în Excel.`;
+    $(msgId).textContent = res ? msg : `Încărcat: ${n} rânduri, ${loc} locații ocupate.`;
   }catch(err){ $(msgId).textContent='Fișier invalid.'; } };
   rd.readAsArrayBuffer(file);
 }
@@ -510,20 +510,42 @@ $('btnInvModel').addEventListener('click',()=>{
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ex),'Inventar');
   XLSX.writeFile(wb,'model_inventar.xlsx');
 });
+// Detectează separatorul unui cod (primul care dă >=3 părți)
+function detectSep(code){ for(const s of ['-','/','.','_',' ']){ if(String(code).split(s).length>=3) return s; } return '-'; }
+// Parsează un cod de locație în {name, L, P, sep, lpref, ppref, ldig, pdig}
+// Extrage NUMĂRUL din orice token (N01→1, R04→4, 27→27), deci merge pe orice format.
+function parseLoc(code){
+  const s=String(code||'').trim().toUpperCase(); if(!s) return null;
+  const sep=detectSep(s), parts=s.split(sep);
+  if(parts.length<3) return null;
+  const lvTok=parts[parts.length-2], plTok=parts[parts.length-1];
+  const name=parts.slice(0,parts.length-2).join(sep);
+  const lm=lvTok.match(/\d+/), pm=plTok.match(/\d+/);
+  if(!name||!lm||!pm) return null;
+  const L=parseInt(lm[0],10), P=parseInt(pm[0],10);
+  if(isNaN(L)||isNaN(P)) return null;
+  return { name, L, P, sep,
+    lpref:(lvTok.match(/^\D+/)||[''])[0], ppref:(plTok.match(/^\D+/)||[''])[0],
+    ldig:lm[0].length, pdig:pm[0].length };
+}
+// Construiește/actualizează schema din codurile de inventar, oricare ar fi formatul,
+// apoi normalizează cheile inventarului la formatul schemei (ca să se potrivească celulele).
 function applySchemaFromInventory(){
   const codes=Object.keys(inventory).filter(k=>inventory[k]&&inventory[k].length);
   if(!codes.length) return null;
-  const detectSep=code=>{ for(const s of ['-','/','.','_',' ']){ if(code.split(s).length>=3) return s; } return '-'; };
-  const sep=detectSep(codes[0]);
-  const need={}; let ld=1,pd=1,parsed=0;
-  codes.forEach(code=>{ const p=code.split(sep); if(p.length<3) return;
-    const name=p[0], lv=p[p.length-2], pl=p[p.length-1], ln=parseInt(lv,10), pn=parseInt(pl,10);
-    if(isNaN(ln)||isNaN(pn)) return;
-    ld=Math.max(ld,(lv.match(/\d/g)||[]).length); pd=Math.max(pd,(pl.match(/\d/g)||[]).length);
-    const m=need[name]||(need[name]={lmax:0,pmax:0}); m.lmax=Math.max(m.lmax,ln); m.pmax=Math.max(m.pmax,pn); parsed++;
+  const need={}; let ld=1,pd=1,parsed=0,unmatched=0; let sep='-',lpref='',ppref='',prefSeen=0;
+  const parsedMap={};
+  codes.forEach(code=>{ const info=parseLoc(code);
+    if(!info){ unmatched++; return; }
+    parsedMap[code]=info; parsed++;
+    sep=info.sep; ld=Math.max(ld,info.ldig); pd=Math.max(pd,info.pdig);
+    if(info.lpref||info.ppref){ if(!prefSeen){ lpref=info.lpref; ppref=info.ppref; prefSeen=1; } }
+    const m=need[info.name]||(need[info.name]={lmax:0,pmax:0});
+    m.lmax=Math.max(m.lmax,info.L); m.pmax=Math.max(m.pmax,info.P);
   });
-  if(!parsed) return null;   // coduri gen A01-N01-R01 → nu atingem nimic
-  $('lpref').value=''; $('ppref').value=''; $('ldig').value=ld; $('pdig').value=pd; $('sep').value=sep;
+  if(!parsed) return { added:0, extended:0, parsed:0, unmatched };
+  // potrivește formatul schemei la ce e în Excel
+  $('lpref').value=lpref; $('ppref').value=ppref; $('ldig').value=ld; $('pdig').value=pd; $('sep').value=sep;
   let added=0, extended=0;
   const existing={}; readRacks().forEach(r=>existing[r.name.toUpperCase()]=r.el);
   Object.keys(need).sort().forEach(name=>{ const m=need[name], key=name.toUpperCase();
@@ -533,13 +555,25 @@ function applySchemaFromInventory(){
       lvI.value=nl; plI.value=np;
     } else { addRackRaw(name, Math.max(1,m.lmax), Math.max(1,m.pmax)); added++; }
   });
-  refresh(); loadDims($('dimRack').value); pushConfig();
-  return {added,extended,parsed,racks:Object.keys(need).length};
+  // normalizează cheile inventarului la formatul canonic al schemei
+  const g=globals(), fresh={};
+  Object.keys(inventory).forEach(code=>{ const info=parsedMap[code];
+    const key=info ? `${info.name}${g.sep}${g.lpref}${pad(info.L,g.ldig)}${g.sep}${g.ppref}${pad(info.P,g.pdig)}` : code.toUpperCase();
+    (fresh[key]=fresh[key]||[]).push(...inventory[code]);
+  });
+  for(const k in inventory) delete inventory[k];
+  Object.keys(fresh).forEach(k=>inventory[k]=fresh[k]);
+  // dacă importul a creat rafturi noi, arată toate rafturile (altfel rămân ascunse de filtru)
+  if(added>0){ const sf=$('schemaRackFilter'); if(sf) sf.value='all'; }
+  refresh(); loadDims($('dimRack').value); pushConfig(); pushAllInventory();
+  return { added, extended, parsed, unmatched, racks:Object.keys(need).length };
 }
 function syncSchemaFromInventory(){
   const res=applySchemaFromInventory();
-  if(!res){ $('invStatus').textContent='Nu ai locații cu format Raft-X-Y (ex. F05-27-04) în inventar.'; return; }
-  $('invStatus').textContent=`Gata: ${res.added} rafturi noi, ${res.extended} extinse.`;
+  if(!res||!res.parsed){ $('invStatus').textContent='Nu am putut interpreta codurile de locație (ex. F05-27-04 sau A01-N01-R01).'; return; }
+  let msg=`Gata: ${res.added} rafturi noi, ${res.extended} extinse.`;
+  if(res.unmatched>0) msg+=` ⚠️ ${res.unmatched} coduri neinterpretabile.`;
+  $('invStatus').textContent=msg;
   document.querySelector('.tab[data-v="schema"]').click();
 }
 $('btnSyncSchema').addEventListener('click', syncSchemaFromInventory);
