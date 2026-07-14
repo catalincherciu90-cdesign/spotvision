@@ -36,6 +36,9 @@ Intră pe https://dash.cloudflare.com și fă-ți un cont gratuit (dacă nu ai).
 - După creare, deschide tab-ul **Console** al bazei și **lipește tot conținutul
   fișierului `schema.sql`**, apoi rulează. Asta creează tabelele. (Poți verifica:
   ar trebui să vezi tabelele `config` și `inventory`.)
+- *(opțional)* Ca baza să nu fie goală la prima deschidere, lipește și rulează
+  și `seed.sql` — pune datele de pornire (raftul A01 + setările). Fără el,
+  aplicația creează singură câteva rafturi implicite la prima deschidere.
 
 ### 3. Conectează GitHub și creează proiectul Pages
 1. **Workers & Pages → Create → Pages → Connect to Git**.
@@ -92,6 +95,9 @@ wrangler d1 create spotvision
 
 # 3. aplica structura tabelelor
 wrangler d1 execute spotvision --remote --file schema.sql
+
+# 3b. (optional) date de pornire din data.json
+wrangler d1 execute spotvision --remote --file seed.sql
 
 # 4. publica aplicatia
 wrangler pages deploy .
