@@ -24,7 +24,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           wranglerVersion: "4"
-          command: d1 execute REPLACE_WITH_D1_NAME --remote --file=./schema.sql
+          command: d1 execute spotvision --remote --file=./schema.sql
 
       - name: Deploy la Cloudflare Workers
         uses: cloudflare/wrangler-action@v3

@@ -12,9 +12,7 @@ binding = "ASSETS"
 # apoi serveste fisierele statice doar utilizatorilor logati.
 run_worker_first = true
 
-# ⚠️ Completeaza cu D1-ul TAU (deja creat in Cloudflare).
-# Ia valorile cu:  npx wrangler d1 list
 [[d1_databases]]
 binding = "DB"
-database_name = "REPLACE_WITH_D1_NAME"
-database_id = "REPLACE_WITH_D1_ID"
+database_name = "spotvision"
+database_id = "5dc0f665-cc52-4536-afdb-2223cd55b4e4"
