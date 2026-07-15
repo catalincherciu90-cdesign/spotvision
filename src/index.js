@@ -359,7 +359,7 @@ function loginPage(setup) {
     try{
       const r=await fetch(SETUP?'/api/register':'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password})});
       const d=await r.json().catch(()=>({}));
-      if(r.ok){ location.href='/'; return; }
+      if(r.ok){ location.reload(); return; }
       err.textContent=d.error||'Eroare.'; btn.disabled=false;
     }catch(ex){ err.textContent='Conexiune eșuată.'; btn.disabled=false; }
   });
