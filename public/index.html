@@ -69,7 +69,7 @@
   #locPanel td.q{text-align:right;font-weight:700}
   #locPanel .tot{font-weight:800}
   #locPanel .empty{color:var(--muted);margin-top:6px}
-  .prow{display:grid;grid-template-columns:1fr 66px 140px 34px;gap:8px;margin-bottom:8px}
+  .prow{display:grid;grid-template-columns:110px 1fr 66px 140px 34px;gap:8px;margin-bottom:8px}
   #fifoResult h3{margin:0 0 6px;font-size:16px}
   #fifoResult ol{margin:6px 0 0;padding-left:22px}
   #fifoResult li{margin:5px 0}
@@ -306,7 +306,7 @@
     <div class="card">
       <h2>FIFO — ordine de scoatere</h2>
       <div class="field" style="margin:0"><label>Caută un produs</label>
-        <input id="fifoProd" list="prodList" placeholder="ex. Cutii carton" autocomplete="off">
+        <input id="fifoProd" list="prodList" placeholder="ex. Cutii carton sau cod SKU" autocomplete="off">
         <datalist id="prodList"></datalist>
       </div>
       <p class="hint" style="margin-top:8px">Îți arată din ce locație să scoți prima, după data intrării (cel mai vechi primul).</p>
@@ -446,11 +446,11 @@ function loadInvRows(rows){
     const code=String(pick(o,['locatie','locație','locatia','location','cod locatie','cod locație'])||'').trim();
     if(!code) return;
     let produs=String(pick(o,['denumire produs','denumire','produs','product','articol','nume','material','descriere'])||'').trim();
-    if(!produs) produs=String(pick(o,['cod produs','cod','cod articol','sku'])||'').trim();
-    if(!produs) produs='(fără nume)';
+    const cod=String(pick(o,['cod produs','cod','cod articol','sku','cod material','cod sap','part number','pn'])||'').trim();
+    if(!produs) produs=cod||'(fără nume)';
     const cant=+(pick(o,['cantitate','cant','bucati','bucăți','buc','qty','stoc'])||0)||0;
     const data=toDateStr(pick(o,['data introducere bo','data creare palet','data','data intrare','data intrării','data intrarii','date','data receptie','data recepție']));
-    const key=code.toUpperCase(); (inventory[key]=inventory[key]||[]).push({produs,cant,data}); n++;
+    const key=code.toUpperCase(); (inventory[key]=inventory[key]||[]).push({produs,cod,cant,data}); n++;
   });
   return n;
 }
@@ -469,9 +469,9 @@ function showLoc(code){
   if(inv&&inv.length){
     const list=inv.slice().sort(byFifo);
     const total=list.reduce((a,x)=>a+(+x.cant||0),0);
-    h+=`<table><thead><tr><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>`;
-    list.forEach((x,i)=>h+=`<tr><td>${esc(x.produs)}${i===0&&x.data?'<span class="fifo-tag">scoate primul</span>':''}</td><td>${esc(x.data||'—')}</td><td class="q">${x.cant}</td><td><button class="delp" title="Șterge produsul" data-produs="${esc(x.produs)}" data-cant="${esc(String(x.cant))}" data-data="${esc(x.data||'')}">✕</button></td></tr>`);
-    h+=`<tr><td class="tot">Total</td><td></td><td class="q tot">${total}</td><td></td></tr></tbody></table>`;
+    h+=`<table><thead><tr><th>Cod</th><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>`;
+    list.forEach((x,i)=>h+=`<tr><td>${esc(x.cod||'—')}</td><td>${esc(x.produs)}${i===0&&x.data?'<span class="fifo-tag">scoate primul</span>':''}</td><td>${esc(x.data||'—')}</td><td class="q">${x.cant}</td><td><button class="delp" title="Șterge produsul" data-cod="${esc(x.cod||'')}" data-produs="${esc(x.produs)}" data-cant="${esc(String(x.cant))}" data-data="${esc(x.data||'')}">✕</button></td></tr>`);
+    h+=`<tr><td class="tot">Total</td><td></td><td></td><td class="q tot">${total}</td><td></td></tr></tbody></table>`;
   } else h+=`<p class="empty">Locație liberă — niciun produs.</p>`;
   p.innerHTML=h;
   refresh();
@@ -481,7 +481,7 @@ $('locPanel').addEventListener('click', e=>{
   if(e.target.classList.contains('close')){ $('locPanel').style.display='none'; selectedCode=''; refresh(); return; }
   if(e.target.classList.contains('delp')){
     const b=e.target, code=(selectedCode||'').toUpperCase(), arr=inventory[code]||[];
-    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
+    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cod||'')===(b.dataset.cod||'') && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
     if(i>=0){ arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); showLoc(code); }
   }
 });
@@ -506,7 +506,7 @@ $('btnInvClear').addEventListener('click',()=>{ for(const k in inventory) delete
 $('btnInvModel').addEventListener('click',()=>{
   const g=globals(), r=readRacks()[0];
   const c=(L,j)=>`${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(j,g.pdig)}`;
-  const ex=[['Locatie','Produs','Cantitate','Data'],[c(1,1),'Cutii carton 40x30',120,'2026-05-10'],[c(1,1),'Folie stretch',15,'2026-06-02'],[c(1,2),'Paleti EUR',30,'2026-04-21']];
+  const ex=[['Locatie','Cod produs','Produs','Cantitate','Data'],[c(1,1),'SKU-1001','Cutii carton 40x30',120,'2026-05-10'],[c(1,1),'SKU-2002','Folie stretch',15,'2026-06-02'],[c(1,2),'SKU-3003','Paleti EUR',30,'2026-04-21']];
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ex),'Inventar');
   XLSX.writeFile(wb,'model_inventar.xlsx');
 });
@@ -592,7 +592,7 @@ function syncInvSelectors(){
   const ls=$('invLevel'), plv=ls.value; ls.innerHTML=Array.from({length:r.levels},(_,i)=>`<option>${i+1}</option>`).join(''); if(+plv>=1&&+plv<=r.levels) ls.value=plv;
   const ps=$('invPallet'), ppv=ps.value; ps.innerHTML=Array.from({length:r.pallets},(_,i)=>`<option>${i+1}</option>`).join(''); if(+ppv>=1&&+ppv<=r.pallets) ps.value=ppv;
 }
-function prowHtml(p){ return `<div class="prow"><input class="p-name" placeholder="Produs" value="${esc(p.produs||'')}"><input class="p-qty" type="number" min="0" placeholder="Cant." value="${p.cant===''||p.cant===undefined?'':p.cant}"><input class="p-date" type="date" title="Data intrării" value="${esc(p.data||'')}"><button class="prm" type="button" title="Șterge">✕</button></div>`; }
+function prowHtml(p){ return `<div class="prow"><input class="p-cod" placeholder="Cod" title="Cod produs / SKU" value="${esc(p.cod||'')}"><input class="p-name" placeholder="Produs" value="${esc(p.produs||'')}"><input class="p-qty" type="number" min="0" placeholder="Cant." value="${p.cant===''||p.cant===undefined?'':p.cant}"><input class="p-date" type="date" title="Data intrării" value="${esc(p.data||'')}"><button class="prm" type="button" title="Șterge">✕</button></div>`; }
 function renderProdEditor(){
   const code=invCurrentCode(); $('invCode').textContent=code;
   const list=inventory[code.toUpperCase()]||[];
@@ -603,8 +603,9 @@ function collectProds(){
   const code=invCurrentCode().toUpperCase(), arr=[];
   $('prodRows').querySelectorAll('.prow').forEach(r=>{
     const produs=r.querySelector('.p-name').value.trim(); const cant=+r.querySelector('.p-qty').value||0;
+    const cod=r.querySelector('.p-cod').value.trim();
     const data=r.querySelector('.p-date').value;
-    if(produs) arr.push({produs,cant,data});
+    if(produs||cod) arr.push({produs:produs||cod,cod,cant,data});
   });
   if(arr.length) inventory[code]=arr; else delete inventory[code];
   pushLoc(code, arr); saveState(); renderInvTable();
@@ -618,28 +619,28 @@ function renderInvTable(){
   $('invSummary').textContent=q?`${codes.length} din ${all.length} locații (filtru: ${esc(invCodeQuery)})`:`${all.length} locații, ${items} produse`;
   updateProductList();
   if(!codes.length){ $('invTableWrap').innerHTML='<div class="empty">'+(q?'Nicio locație cu acest cod.':'Niciun produs încă. Alege o locație și adaugă produse.')+'</div>'; return; }
-  let h='<table><thead><tr><th>Locație</th><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>';
+  let h='<table><thead><tr><th>Locație</th><th>Cod</th><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>';
   codes.forEach(code=>{ inventory[code].slice().sort(byFifo).forEach((p,i)=>{
-    h+=`<tr class="${i===0?'loc':''}"><td>${i===0?`<span class="code" data-code="${esc(code)}">${esc(code)}</span>`:''}</td><td>${esc(p.produs)}</td><td>${esc(p.data||'—')}</td><td class="q">${p.cant}</td><td><button class="delp" title="Șterge produsul" data-code="${esc(code)}" data-produs="${esc(p.produs)}" data-cant="${esc(String(p.cant))}" data-data="${esc(p.data||'')}">✕</button></td></tr>`;
+    h+=`<tr class="${i===0?'loc':''}"><td>${i===0?`<span class="code" data-code="${esc(code)}">${esc(code)}</span>`:''}</td><td>${esc(p.cod||'—')}</td><td>${esc(p.produs)}</td><td>${esc(p.data||'—')}</td><td class="q">${p.cant}</td><td><button class="delp" title="Șterge produsul" data-code="${esc(code)}" data-cod="${esc(p.cod||'')}" data-produs="${esc(p.produs)}" data-cant="${esc(String(p.cant))}" data-data="${esc(p.data||'')}">✕</button></td></tr>`;
   }); });
   $('invTableWrap').innerHTML=h+'</tbody></table>';
 }
 function updateProductList(){
   const set=new Set();
-  Object.values(inventory).forEach(arr=>arr.forEach(p=>{ if(p.produs) set.add(p.produs); }));
+  Object.values(inventory).forEach(arr=>arr.forEach(p=>{ if(p.produs) set.add(p.produs); if(p.cod) set.add(p.cod); }));
   const dl=$('prodList'); if(dl) dl.innerHTML=[...set].sort().map(n=>`<option value="${esc(n)}">`).join('');
 }
 function renderFifo(query){
   const q=(query||'').trim().toLowerCase(); const box=$('fifoResult');
   if(!q){ box.style.display='none'; box.innerHTML=''; return; }
   const hits=[];
-  Object.keys(inventory).forEach(code=>inventory[code].forEach(p=>{ if((p.produs||'').toLowerCase().includes(q)) hits.push({code,produs:p.produs,cant:p.cant,data:p.data}); }));
+  Object.keys(inventory).forEach(code=>inventory[code].forEach(p=>{ if((p.produs||'').toLowerCase().includes(q)||(p.cod||'').toLowerCase().includes(q)) hits.push({code,produs:p.produs,cod:p.cod,cant:p.cant,data:p.data}); }));
   hits.sort(byFifo);
   box.style.display='block';
-  if(!hits.length){ box.innerHTML=`<h3>FIFO: „${esc(query)}"</h3><p class="empty">Nu am găsit produsul în nicio locație.</p>`; return; }
+  if(!hits.length){ box.innerHTML=`<h3>FIFO: „${esc(query)}"</h3><p class="empty">Nu am găsit produsul (nici după nume, nici după cod).</p>`; return; }
   const total=hits.reduce((a,x)=>a+(+x.cant||0),0);
   let h=`<h3>Ordine de scoatere (FIFO)</h3><p class="sub">„${esc(query)}" — ${hits.length} loturi, total ${total} buc. Scoate de sus în jos.</p><ol>`;
-  hits.forEach((x,i)=>{ h+=`<li class="${i===0?'first':''}"><span class="code" data-code="${esc(x.code)}">${esc(x.code)}</span> — ${esc(x.produs)} · ${x.cant} buc · intrat: ${esc(x.data||'fără dată')}${i===0?' <span class="fifo-tag">scoate primul</span>':''}</li>`; });
+  hits.forEach((x,i)=>{ h+=`<li class="${i===0?'first':''}"><span class="code" data-code="${esc(x.code)}">${esc(x.code)}</span> — ${x.cod?'<b>'+esc(x.cod)+'</b> · ':''}${esc(x.produs)} · ${x.cant} buc · intrat: ${esc(x.data||'fără dată')}${i===0?' <span class="fifo-tag">scoate primul</span>':''}</li>`; });
   box.innerHTML=h+'</ol>';
 }
 $('fifoProd').addEventListener('input', e=>renderFifo(e.target.value));
@@ -670,7 +671,7 @@ $('prodRows').addEventListener('click', e=>{ if(e.target.classList.contains('prm
 $('invTableWrap').addEventListener('click', e=>{
   if(e.target.classList.contains('delp')){
     const b=e.target, code=b.dataset.code.toUpperCase(), arr=inventory[code]||[];
-    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
+    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cod||'')===(b.dataset.cod||'') && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
     if(i>=0){ arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); renderInvTable(); }
     return;
   }
@@ -679,8 +680,8 @@ $('invTableWrap').addEventListener('click', e=>{
 $('fifoResult').addEventListener('click', e=>{ const c=e.target.closest('.code'); if(c) goToSchema(c.getAttribute('data-code')); });
 $('invSearch').addEventListener('input', e=>{ invCodeQuery=e.target.value.trim(); renderInvTable(); });
 $('invExport').addEventListener('click',()=>{ try{
-  const wb=XLSX.utils.book_new(), rows=[['Locatie','Produs','Cantitate','Data']];
-  Object.keys(inventory).sort().forEach(k=>inventory[k].slice().sort(byFifo).forEach(p=>rows.push([k,p.produs,p.cant,p.data||''])));
+  const wb=XLSX.utils.book_new(), rows=[['Locatie','Cod produs','Produs','Cantitate','Data']];
+  Object.keys(inventory).sort().forEach(k=>inventory[k].slice().sort(byFifo).forEach(p=>rows.push([k,p.cod||'',p.produs,p.cant,p.data||''])));
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Inventar');
   XLSX.writeFile(wb,'inventar.xlsx'); $('invExpStatus').textContent='Exportat: inventar.xlsx';
 }catch(e){ $('invExpStatus').textContent='Eroare.'; } });
@@ -925,8 +926,8 @@ function exportExcel(){
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(dm),'Dimensiuni');
     const g=globals(), st=[['Cheie','Valoare'],['lpref',g.lpref],['ppref',g.ppref],['ldig',g.ldig],['pdig',g.pdig],['sep',g.sep],['base',g.base],['pdir',g.pdir],['mode',g.mode],['cap',g.cap]];
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(st),'Setari');
-    const invRows=[['Locatie','Produs','Cantitate','Data']];
-    for(const k in inventory) inventory[k].forEach(x=>invRows.push([k,x.produs,x.cant,x.data||'']));
+    const invRows=[['Locatie','Cod produs','Produs','Cantitate','Data']];
+    for(const k in inventory) inventory[k].forEach(x=>invRows.push([k,x.cod||'',x.produs,x.cant,x.data||'']));
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(invRows),'Inventar');
     XLSX.writeFile(wb,'config_rafturi.xlsx');
     $('ioStatus').textContent='Salvat: config_rafturi.xlsx';
