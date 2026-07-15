@@ -148,6 +148,7 @@
     <button class="tab" data-v="inv">Inventar</button>
     <button class="tab" data-v="dim">Dimensiuni raft</button>
     <button class="tab" data-v="tech">Schiță tehnică</button>
+    <button class="tab" data-v="users">Utilizatori</button>
   </div>
   <div id="syncBadge" class="badge">—</div>
   <div id="authBar" style="position:absolute;top:12px;right:14px;font-size:13px;color:#64748b;display:none;align-items:center;gap:10px">
@@ -157,24 +158,25 @@
   </div>
 </header>
 
-<!-- ============ MODAL UTILIZATORI ============ -->
-<div id="usersModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;align-items:center;justify-content:center;padding:20px">
-  <div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <h2 style="margin:0;font-size:18px">Utilizatori</h2>
-      <a href="#" id="usersClose" style="color:#64748b;text-decoration:none;font-size:22px;line-height:1">×</a>
-    </div>
-    <p style="margin:0 0 14px;color:#64748b;font-size:13px">Adaugă colegi sau șterge conturi. Fiecare intră cu id-ul și parola lui.</p>
-    <div id="usersList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px"></div>
-    <div style="border-top:1px solid #e2e8f0;padding-top:14px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input id="newUid" placeholder="id coleg nou" style="flex:1;min-width:120px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px">
-        <input id="newPwd" type="password" placeholder="parolă" style="flex:1;min-width:120px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px">
-      </div>
-      <button id="addUser" class="main" style="margin-top:10px">Adaugă cont</button>
-      <div id="usersErr" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:16px"></div>
+<!-- ============ VIEW: UTILIZATORI ============ -->
+<div id="viewUsers" hidden>
+<div class="wrap">
+  <div class="controls">
+    <div class="card">
+      <h2>Adaugă utilizator</h2>
+      <p class="hint" style="margin-top:0;margin-bottom:12px">Fiecare coleg intră cu id-ul și parola lui. Conturile sunt partajate — toți lucrează pe aceleași date.</p>
+      <div class="field"><label>Id (utilizator nou)</label><input id="newUid" placeholder="ex: ion"></div>
+      <div class="field"><label>Parolă</label><input id="newPwd" type="password" placeholder="parolă"></div>
+      <button id="addUser" class="main">➕ Adaugă cont</button>
+      <div id="usersErr" class="status" style="color:#dc2626"></div>
     </div>
   </div>
+  <div>
+    <p class="total" style="margin-bottom:6px">Utilizatori</p>
+    <p class="sub">Toate conturile care pot intra în aplicație. „șterge" elimină contul (nu poți șterge ultimul cont).</p>
+    <div class="stage"><div id="usersList" style="display:flex;flex-direction:column;gap:8px"></div></div>
+  </div>
+</div>
 </div>
 
 <!-- ============ VIEW: SCHEMA LOCATII ============ -->
@@ -406,6 +408,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   $('viewInv').hidden=v!=='inv';
   $('viewDim').hidden=v!=='dim';
   $('viewTech').hidden=v!=='tech';
+  const vu=$('viewUsers'); if(vu) vu.hidden=v!=='users';
   refresh();
   if(v==='schema') setTimeout(fitZoom,30); // incadreaza automat pe ecran
 }));
@@ -1247,13 +1250,10 @@ initApp();
     location.href='/';
   });
 
-  // ---- modal utilizatori ----
-  const modal = $('usersModal');
-  function openUsers(){ modal.style.display='flex'; loadUsers(); }
-  function closeUsers(){ modal.style.display='none'; $('usersErr').textContent=''; }
-  $('btnUsers').addEventListener('click', e=>{ e.preventDefault(); openUsers(); });
-  $('usersClose').addEventListener('click', e=>{ e.preventDefault(); closeUsers(); });
-  modal.addEventListener('click', e=>{ if(e.target===modal) closeUsers(); });
+  // ---- tab utilizatori ----
+  const usersTab = document.querySelector('.tab[data-v="users"]');
+  $('btnUsers').addEventListener('click', e=>{ e.preventDefault(); if(usersTab) usersTab.click(); });
+  if(usersTab) usersTab.addEventListener('click', ()=>{ $('usersErr').textContent=''; loadUsers(); });
 
   async function loadUsers(){
     const list = $('usersList'); list.innerHTML = 'Se încarcă…';
