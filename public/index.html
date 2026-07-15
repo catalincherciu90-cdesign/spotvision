@@ -48,7 +48,10 @@
   .stage{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;overflow:auto}
   .rack-svg{margin-bottom:26px}
   .rack-svg svg{height:auto;display:block;margin:0}
-  #techDraw svg,#dimPreview svg{max-width:100%;height:auto;display:block;margin:0}
+  #dimPreview svg{max-width:100%;height:auto;display:block;margin:0}
+  /* schita tehnica: inaltime fixa + derulare orizontala (slide stanga-dreapta) */
+  #techDraw svg{height:72vh;width:auto;max-width:none;display:block;margin:0}
+  #viewTech .stage{overflow:auto}
   #viewSchema .stage{max-height:78vh}
   .zoombar{display:flex;align-items:center;gap:8px;margin:0 0 12px}
   .zoombar button{width:32px;height:32px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-size:16px;font-weight:700}
@@ -136,6 +139,7 @@
     .stage{border:0;padding:0}
     .rack-svg{margin:0;page-break-after:always;break-after:page}
     .rack-svg svg{width:auto!important;max-width:100%!important}
+    #techDraw svg{height:auto!important;width:auto!important;max-width:100%!important}
     #viewSchema .stage{max-height:none}
     .noprint{display:none!important}
   }
