@@ -174,6 +174,20 @@
     #viewSchema .stage{height:auto}
     .noprint{display:none!important}
   }
+  /* etichete: previzualizare (fiecare eticheta = jumatate de coala A4 pe lat, A5 landscape) */
+  #labelsSheet{display:flex;flex-direction:column;gap:14px;align-items:center}
+  .label{width:210mm;height:148.5mm;box-sizing:border-box;background:#fff;border:1px solid #cbd5e1;
+    padding:10mm 12mm;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;overflow:hidden;transform-origin:top center}
+  .label .lbl-title{font-size:9mm;font-weight:800;letter-spacing:.06em;color:#334155;margin-bottom:2mm}
+  .label .lbl-code{font-size:24mm;font-weight:900;color:#0f172a;line-height:1;letter-spacing:.02em;word-break:break-all}
+  .label .lbl-bc{margin:4mm 0 2mm}
+  .label .lbl-bc svg{width:150mm;height:22mm;display:block}
+  .label .lbl-meta{font-size:7mm;font-weight:700;color:#334155;margin-top:1mm}
+  .label .lbl-prod{font-size:5mm;font-weight:600;color:#475569;margin-top:2mm}
+  /* pe ecran micsoram intreaga previzualizare ca sa incapa (zoom reflow-eaza corect) */
+  #labelsSheet{zoom:.6}
+  @media(max-width:860px){ #labelsSheet{zoom:.4} }
 </style>
 </head>
 <body>
@@ -185,6 +199,7 @@
     <button class="tab" data-v="inv">Inventar</button>
     <button class="tab" data-v="dim">Dimensiuni raft</button>
     <button class="tab" data-v="tech">Schiță tehnică</button>
+    <button class="tab" data-v="labels">Etichete</button>
     <button class="tab" data-v="users">Utilizatori</button>
   </div>
   <div id="syncBadge" class="badge">—</div>
@@ -450,6 +465,29 @@
 </div>
 </div>
 
+<!-- ============ VIEW: ETICHETE ============ -->
+<div id="viewLabels" hidden>
+<div class="wrap">
+  <div class="controls">
+    <div class="card">
+      <h2>Etichete locații</h2>
+      <div class="field"><label>Raft</label><select id="lblRack"></select></div>
+      <div class="field"><label>Locații</label>
+        <select id="lblScope"><option value="all" selected>Toate locațiile</option><option value="occ">Doar cele ocupate</option><option value="free">Doar cele libere</option></select></div>
+      <label class="perlvl-toggle"><input type="checkbox" id="lblBarcode" checked> Cod de bare (Code 39)</label>
+      <label class="perlvl-toggle"><input type="checkbox" id="lblProd" checked> Afișează produsul (dacă e ocupat)</label>
+      <div class="field" style="margin-top:12px"><label>Titlu pe etichetă</label><input id="lblTitle" value="DEPOZIT" maxlength="40"></div>
+      <button class="main" id="lblPrint" style="margin-top:6px">🖨️ Printează etichetele</button>
+      <p class="hint" style="margin-top:8px">Format: jumătate de coală A4 (A5) landscape — 2 etichete pe pagină. <span id="lblCount"></span></p>
+    </div>
+  </div>
+  <div>
+    <p class="sub noprint">Previzualizare. Fiecare etichetă = jumătate de coală A4 pe lat (210 × 148,5 mm).</p>
+    <div class="stage"><div id="labelsSheet"></div></div>
+  </div>
+</div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
@@ -466,9 +504,11 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   $('viewInv').hidden=v!=='inv';
   $('viewDim').hidden=v!=='dim';
   $('viewTech').hidden=v!=='tech';
+  { const vl=$('viewLabels'); if(vl) vl.hidden=v!=='labels'; }
   const vu=$('viewUsers'); if(vu) vu.hidden=v!=='users';
   refresh();
   if(v==='schema') setTimeout(fitZoom,30); // incadreaza automat pe ecran
+  if(v==='labels') renderLabels();
 }));
 
 // ---------- RAFTURI (cu id stabil) ----------
@@ -613,6 +653,9 @@ $('dimRack').addEventListener('input', ()=>{ loadDims($('dimRack').value); if(!$
 $('dimInputs').addEventListener('input', e=>{ syncBayWidth(); saveDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); if(typeof saveState==='function') saveState(); });
 // comutatorul „dimensiuni diferite pe nivel"
 $('tPerLevel').addEventListener('change', ()=>{ const id=$('dimRack').value; syncLevelDims(id); saveDims(id); if(!$('viewDim').hidden) drawDim(); if(typeof saveState==='function') saveState(); });
+// etichete
+['lblRack','lblScope','lblBarcode','lblProd','lblTitle'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', ()=>{ if(!$('viewLabels').hidden) renderLabels(); }); });
+$('lblPrint').addEventListener('click', printLabels);
 $('applyAll').addEventListener('click', ()=>{
   const d=readDimInputs(); readRacks().forEach(r=>dimStore[r.id]={...d});
   if(typeof saveState==='function') saveState();
@@ -1082,6 +1125,80 @@ function syncSelect(sel){
   if([...sel.options].some(o=>o.value===prev)) sel.value=prev; else if(sel.options.length) sel.selectedIndex=0;
 }
 function drawDim(){ const id=$('dimRack').value; if(id){ syncBayWidth(); syncLevelDims(id); $('dimPreview').innerHTML=buildTech(techConfig(id)).svg; } }
+
+// ---------- ETICHETE (jumatate de coala A4 landscape, cod de bare Code 39) ----------
+const C39={'0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4':'nnnwwnnnw','5':'wnnwwnnnn','6':'nnwwwnnnn','7':'nnnwnnwnw','8':'wnnwnnwnn','9':'nnwwnnwnn','A':'wnnnnwnnw','B':'nnwnnwnnw','C':'wnwnnwnnn','D':'nnnnwwnnw','E':'wnnnwwnnn','F':'nnwnwwnnn','G':'nnnnnwwnw','H':'wnnnnwwnn','I':'nnwnnwwnn','J':'nnnnwwwnn','K':'wnnnnnnww','L':'nnwnnnnww','M':'wnwnnnnwn','N':'nnnnwnnww','O':'wnnnwnnwn','P':'nnwnwnnwn','Q':'nnnnnnwww','R':'wnnnnnwwn','S':'nnwnnnwwn','T':'nnnnwnwwn','U':'wwnnnnnnw','V':'nwwnnnnnw','W':'wwwnnnnnn','X':'nwnnwnnnw','Y':'wwnnwnnnn','Z':'nwwnwnnnn','-':'nwnnnnwnw','.':'wwnnnnwnn',' ':'nwwnnnwnn','*':'nwnnwnwnn'};
+// genereaza un cod de bare Code 39 ca SVG (bare negre pe alb)
+function barcode39(text){
+  const data='*'+String(text).toUpperCase().replace(/[^0-9A-Z\-. ]/g,'')+'*';
+  const nw=1, ww=3, gap=1; let x=0; const bars=[]; let vh=100;
+  for(let c=0;c<data.length;c++){
+    const pat=C39[data[c]]||C39['-'];
+    for(let i=0;i<9;i++){ const w=(pat[i]==='w')?ww:nw; if(i%2===0){ bars.push(`<rect x="${x}" y="0" width="${w}" height="${vh}" fill="#000"/>`); } x+=w; }
+    x+=gap; // spatiu ingust intre caractere
+  }
+  const W=x-gap;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${vh}" preserveAspectRatio="none">${bars.join('')}</svg>`;
+}
+// lista locatiilor pentru eticheta, dupa raftul si scope-ul ales
+function labelData(){
+  const g=globals(), rs=readRacks(), sel=$('lblRack')?$('lblRack').value:'all';
+  const scope=$('lblScope')?$('lblScope').value:'all';
+  const racks=(sel==='all')?rs:rs.filter(r=>r.id===sel);
+  const out=[];
+  racks.forEach(r=>{ for(let L=1;L<=r.levels;L++) for(let j=1;j<=r.pallets;j++){
+    const code=locCode(r.name,L,j,g), inv=invByCode(code), occ=!!(inv&&inv.length);
+    if(scope==='occ'&&!occ) continue;
+    if(scope==='free'&&occ) continue;
+    const prod=occ?inv.map(p=>p.produs+(p.cant?' ×'+p.cant:'')).join(', '):'';
+    out.push({code,rack:r.name,L,pal:j,occ,prod});
+  }});
+  return out;
+}
+function labelInner(d,opt){
+  const title=opt.title?`<div class="lbl-title">${esc(opt.title)}</div>`:'';
+  const bc=opt.barcode?`<div class="lbl-bc">${barcode39(d.code)}</div>`:'';
+  const prod=(opt.prod&&d.occ&&d.prod)?`<div class="lbl-prod">${esc(d.prod)}</div>`:'';
+  return `${title}<div class="lbl-code">${esc(d.code)}</div>${bc}`
+    +`<div class="lbl-meta">Raft ${esc(d.rack)} · Nivel ${d.L} · Palet ${d.pal}</div>${prod}`;
+}
+function labelOpts(){ return {
+  barcode:$('lblBarcode')?$('lblBarcode').checked:true,
+  prod:$('lblProd')?$('lblProd').checked:true,
+  title:$('lblTitle')?$('lblTitle').value.trim():''
+};}
+function syncLblRack(){
+  const sel=$('lblRack'); if(!sel) return; const prev=sel.value, racks=readRacks();
+  sel.innerHTML='<option value="all">Toate rafturile</option>'+racks.map(r=>`<option value="${r.id}">Raft ${esc(r.name)} — ${r.levels} niv × ${r.pallets} pal</option>`).join('');
+  if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
+}
+function renderLabels(){
+  const box=$('labelsSheet'); if(!box) return;
+  syncLblRack();
+  const data=labelData(), opt=labelOpts();
+  const cnt=$('lblCount'); if(cnt) cnt.textContent=data.length+' etichete';
+  if(!data.length){ box.innerHTML='<p class="hint">Nicio locație pentru selecția curentă.</p>'; return; }
+  box.innerHTML=data.map(d=>`<div class="label">${labelInner(d,opt)}</div>`).join('');
+}
+function printLabels(){
+  const data=labelData(), opt=labelOpts();
+  if(!data.length){ alert('Nicio locație de printat pentru selecția curentă.'); return; }
+  const css=`@page{size:A4 portrait;margin:0}
+    *{margin:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    .label{width:210mm;height:148.5mm;padding:10mm 12mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;page-break-inside:avoid}
+    .label:nth-child(2n){page-break-after:always}
+    .lbl-title{font-size:9mm;font-weight:800;letter-spacing:.06em;color:#334155;margin-bottom:2mm}
+    .lbl-code{font-size:24mm;font-weight:900;color:#0f172a;line-height:1;letter-spacing:.02em;word-break:break-all}
+    .lbl-bc{margin:4mm 0 2mm}
+    .lbl-bc svg{width:150mm;height:22mm;display:block}
+    .lbl-meta{font-size:7mm;font-weight:700;color:#334155;margin-top:1mm}
+    .lbl-prod{font-size:5mm;font-weight:600;color:#475569;margin-top:2mm}`;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Etichete</title><style>${css}</style></head><body>`
+    +data.map(d=>`<div class="label">${labelInner(d,opt)}</div>`).join('')
+    +`<script>window.onload=function(){window.focus();window.print();}<\/script></body></html>`;
+  const w=window.open('','_blank'); if(!w){ alert('Permite ferestrele pop-up pentru a printa etichetele.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
 let schemaFilterInit=false;
 function syncSchemaFilter(){
   const sel=$('schemaRackFilter'); if(!sel) return; const prev=sel.value, rs=readRacks();
