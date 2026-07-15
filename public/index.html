@@ -885,7 +885,29 @@ function renderLegend(g){
       +'<span class="tip">Click pe o celulă pentru detalii</span>';
   }
 }
+// Creează/extinde automat rafturile ca să acopere toate locațiile din inventar,
+// folosind formatul curent (fără a reseta setările). Astfel încărcarea apare pe
+// schemă fără să fie nevoie de butonul „Sincronizează".
+function autoFitRacks(){
+  const g=globals(), need={};
+  Object.keys(inventory).forEach(code=>{ if(!inventory[code]||!inventory[code].length) return;
+    const info=parseLoc(code,g); if(!info) return;
+    const m=need[info.name]||(need[info.name]={lmax:0,pmax:0});
+    m.lmax=Math.max(m.lmax,info.L); m.pmax=Math.max(m.pmax,info.P);
+  });
+  const names=Object.keys(need); if(!names.length) return false;
+  const existing={}; readRacks().forEach(r=>existing[r.name.toUpperCase()]=r.el);
+  let changed=false;
+  names.forEach(name=>{ const m=need[name], key=name.toUpperCase();
+    if(existing[key]){ const el=existing[key], lvI=el.querySelector('.r-lev'), plI=el.querySelector('.r-pal');
+      const nl=Math.max(+lvI.value||1,m.lmax), np=Math.max(+plI.value||1,m.pmax);
+      if(nl!=(+lvI.value)||np!=(+plI.value)){ lvI.value=nl; plI.value=np; changed=true; }
+    } else { addRackRaw(name,Math.max(1,m.lmax),Math.max(1,m.pmax)); changed=true; }
+  });
+  return changed;
+}
 function refresh(){
+  autoFitRacks();
   const g=globals(),racks=readRacks();
   renderLegend(g);
   let tot=0;
@@ -1109,6 +1131,7 @@ function startPolling(){ clearInterval(pollTimer); pollTimer=setInterval(async (
     if(nw!==cur){
       for(const k in inventory) delete inventory[k];
       Object.keys(inv).forEach(k=>inventory[k.toUpperCase()]=inv[k]);
+      autoFitRacks();
       if(!$('viewSchema').hidden){ $('schema').innerHTML=schemaHTML(); $('occ').textContent=Object.keys(inventory).length?occupiedCount():'0'; applyZoom(); }
       if(!$('viewInv').hidden){ renderInvTable(); if(!(document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#prodRows'))) renderProdEditor(); }
     }
