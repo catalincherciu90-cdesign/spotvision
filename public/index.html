@@ -1146,12 +1146,24 @@ $('btnReset').addEventListener('click', ()=>{
 });
 
 // init
+// Dacă formatul codurilor din inventar NU se potrivește cu ce generează schema
+// (ex: inventar „E04-04-01" dar schema „E04-R04-N01"), potrivește automat formatul
+// la inventar (ca butonul „Sincronizează"), ca ocuparea să apară fără interacțiune.
+function autoSyncFormat(){
+  const g=globals(); let mismatch=false;
+  for(const code of Object.keys(inventory)){
+    const arr=inventory[code]; if(!arr||!arr.length) continue;
+    const info=parseLoc(code,g); if(!info) continue;
+    if(locCode(info.name,info.L,info.P,g)!==code){ mismatch=true; break; }
+  }
+  if(mismatch) applySchemaFromInventory();
+}
 async function initApp(){
   if(SERVER){
     try{
       const st=await (await fetch('/api/data')).json();
       const has=(st.racks&&st.racks.length)||Object.keys(st.inv||{}).length;
-      if(has) applyState(st);
+      if(has){ applyState(st); autoSyncFormat(); }
       else { if(!restoreState()){ addRack('A01',4,3); addRack('A02',4,3); loadDims($('dimRack').value); } pushConfig(); pushAllInventory(); }
       setSyncBadge(true); startPolling();
     }catch(e){ setSyncBadge(false); if(!restoreState()){ addRack('A01',4,3); addRack('A02',4,3); loadDims($('dimRack').value); } }
