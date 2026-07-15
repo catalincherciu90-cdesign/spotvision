@@ -177,16 +177,21 @@
   /* etichete: previzualizare (fiecare eticheta = jumatate de coala A4 pe lat, A5 landscape) */
   #labelsSheet{display:flex;flex-direction:column;gap:14px;align-items:center}
   .label{width:210mm;height:148.5mm;box-sizing:border-box;background:#fff;border:1px solid #cbd5e1;
-    padding:10mm 12mm;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    text-align:center;overflow:hidden;transform-origin:top center}
+    padding:10mm 36mm 10mm 14mm;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;overflow:hidden;position:relative;transform-origin:top center}
   .label .lbl-title{font-size:9mm;font-weight:800;letter-spacing:.06em;color:#334155;margin-bottom:2mm}
   .label .lbl-code{font-size:24mm;font-weight:900;color:#0f172a;line-height:1;letter-spacing:.02em;word-break:break-all}
   .label .lbl-bc{margin:4mm 0 2mm}
-  .label .lbl-bc svg{width:150mm;height:22mm;display:block}
+  .label .lbl-bc svg{width:140mm;height:22mm;display:block}
   .label .lbl-qr{margin:3mm 0 1mm}
   .label .lbl-qr svg{width:38mm;height:38mm;display:block}
   .label .lbl-meta{font-size:7mm;font-weight:700;color:#334155;margin-top:1mm}
   .label .lbl-prod{font-size:5mm;font-weight:600;color:#475569;margin-top:2mm}
+  /* coloana cu nivelele pe coltul din dreapta (de jos in sus; nivelul curent mai mare + evidentiat) */
+  .label .lbl-levels{position:absolute;right:5mm;top:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2mm}
+  .label .lbl-levels-cap{writing-mode:vertical-rl;transform:rotate(180deg);font-size:4.5mm;font-weight:800;letter-spacing:.2em;color:#94a3b8;margin-bottom:2mm}
+  .label .lbl-levels span{display:flex;align-items:center;justify-content:center;width:13mm;height:13mm;border:.5mm solid #cbd5e1;border-radius:2.5mm;font-size:7.5mm;font-weight:800;color:#475569;background:#f1f5f9}
+  .label .lbl-levels span.cur{width:20mm;height:20mm;font-size:13mm;font-weight:900;color:#fff;background:#2563eb;border-color:#2563eb;box-shadow:0 0 0 .8mm #bfdbfe}
   /* pe ecran micsoram intreaga previzualizare ca sa incapa (zoom reflow-eaza corect) */
   #labelsSheet{zoom:.6}
   @media(max-width:860px){ #labelsSheet{zoom:.4} }
@@ -3470,9 +3475,15 @@ function labelData(){
     if(scope==='occ'&&!occ) continue;
     if(scope==='free'&&occ) continue;
     const prod=occ?inv.map(p=>p.produs+(p.cant?' ×'+p.cant:'')).join(', '):'';
-    out.push({code,rack:r.name,L,pal:j,occ,prod});
+    out.push({code,rack:r.name,L,pal:j,occ,prod,levels:r.levels});
   }});
   return out;
+}
+// coloana cu nivelele raftului pe coltul din dreapta (de jos in sus, nivelul curent evidentiat)
+function levelStrip(N,cur){
+  let s='';
+  for(let i=N;i>=1;i--) s+=`<span class="${i===cur?'cur':''}">${i}</span>`;
+  return `<div class="lbl-levels" aria-label="Nivelul ${cur} din ${N}"><b class="lbl-levels-cap">NIVEL</b>${s}</div>`;
 }
 // URL care deschide aplicatia direct pe locatia respectiva (pentru codul QR)
 function locURL(code){ return location.origin+location.pathname+'?loc='+encodeURIComponent(code); }
@@ -3488,8 +3499,9 @@ function labelInner(d,opt){
   if(opt.code==='qr'){ const svg=qrSVG(locURL(d.code)); code=svg?`<div class="lbl-qr">${svg}</div>`:`<div class="lbl-bc">${barcode39(d.code)}</div>`; }
   else if(opt.code==='c39'){ code=`<div class="lbl-bc">${barcode39(d.code)}</div>`; }
   const prod=(opt.prod&&d.occ&&d.prod)?`<div class="lbl-prod">${esc(d.prod)}</div>`:'';
+  const levels=levelStrip(d.levels||1,d.L);
   return `${title}<div class="lbl-code">${esc(d.code)}</div>${code}`
-    +`<div class="lbl-meta">Raft ${esc(d.rack)} · Nivel ${d.L} · Palet ${d.pal}</div>${prod}`;
+    +`<div class="lbl-meta">Raft ${esc(d.rack)} · Nivel ${d.L} · Palet ${d.pal}</div>${prod}${levels}`;
 }
 function labelOpts(){ return {
   code:$('lblCode')?$('lblCode').value:'qr',
@@ -3514,16 +3526,20 @@ function printLabels(){
   if(!data.length){ alert('Nicio locație de printat pentru selecția curentă.'); return; }
   const css=`@page{size:A4 portrait;margin:0}
     *{margin:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
-    .label{width:210mm;height:148.5mm;padding:10mm 12mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;page-break-inside:avoid}
+    .label{width:210mm;height:148.5mm;padding:10mm 36mm 10mm 14mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;position:relative;page-break-inside:avoid}
     .label:nth-child(2n){page-break-after:always}
     .lbl-title{font-size:9mm;font-weight:800;letter-spacing:.06em;color:#334155;margin-bottom:2mm}
     .lbl-code{font-size:24mm;font-weight:900;color:#0f172a;line-height:1;letter-spacing:.02em;word-break:break-all}
     .lbl-bc{margin:4mm 0 2mm}
-    .lbl-bc svg{width:150mm;height:22mm;display:block}
+    .lbl-bc svg{width:140mm;height:22mm;display:block}
     .lbl-qr{margin:3mm 0 1mm}
     .lbl-qr svg{width:38mm;height:38mm;display:block}
     .lbl-meta{font-size:7mm;font-weight:700;color:#334155;margin-top:1mm}
-    .lbl-prod{font-size:5mm;font-weight:600;color:#475569;margin-top:2mm}`;
+    .lbl-prod{font-size:5mm;font-weight:600;color:#475569;margin-top:2mm}
+    .lbl-levels{position:absolute;right:5mm;top:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2mm}
+    .lbl-levels-cap{writing-mode:vertical-rl;transform:rotate(180deg);font-size:4.5mm;font-weight:800;letter-spacing:.2em;color:#94a3b8;margin-bottom:2mm}
+    .lbl-levels span{display:flex;align-items:center;justify-content:center;width:13mm;height:13mm;border:.5mm solid #cbd5e1;border-radius:2.5mm;font-size:7.5mm;font-weight:800;color:#475569;background:#f1f5f9}
+    .lbl-levels span.cur{width:20mm;height:20mm;font-size:13mm;font-weight:900;color:#fff;background:#2563eb;border-color:#2563eb;box-shadow:0 0 0 .8mm #bfdbfe}`;
   const html=`<!doctype html><html><head><meta charset="utf-8"><title>Etichete</title><style>${css}</style></head><body>`
     +data.map(d=>`<div class="label">${labelInner(d,opt)}</div>`).join('')
     +`<script>window.onload=function(){window.focus();window.print();}<\/script></body></html>`;
