@@ -321,9 +321,10 @@
       <div class="card">
         <h2>Cote structură (mm)</h2>
         <div class="row">
-          <div class="field"><label>Deschidere (lățime bay)</label><input id="tWb" type="number" value="2700"></div>
+          <div class="field"><label>Lățime loc palet</label><input id="tSlotW" type="number" value="900"><span class="hint">Un singur loc — se înmulțește cu nr. de paleți</span></div>
           <div class="field"><label>Lățime montant</label><input id="tUw" type="number" value="100"></div>
         </div>
+        <div class="field"><label>Deschidere totală (loc × paleți)</label><input id="tWb" type="number" value="2700" readonly style="background:#f1f5f9;color:#475569;cursor:not-allowed"><span class="hint">Calculată automat din lățimea unui loc</span></div>
         <div class="row">
           <div class="field"><label>Adâncime raft</label><input id="tD" type="number" value="1100"></div>
           <div class="field"><label>Secțiune grindă</label><input id="tBh" type="number" value="120"></div>
@@ -501,17 +502,33 @@ function locCode(name,L,P,g){
 }
 
 // ---------- DIMENSIUNI per raft ----------
-const DEF={Wb:2700,Uw:100,D:1100,Bh:120,h0:1800,hp:1600,topClear:1600,palletL:1200,palletW:800,Pf:800,Pd:1200,goodsH:1200,load:1000};
+const DEF={slotW:900,Wb:2700,Uw:100,D:1100,Bh:120,h0:1800,hp:1600,topClear:1600,palletL:1200,palletW:800,Pf:800,Pd:1200,goodsH:1200,load:1000};
 const dimStore={};                       // id -> dims
-const DIM_IDS={Wb:'tWb',Uw:'tUw',D:'tD',Bh:'tBh',h0:'tH0',hp:'tHp',topClear:'tTop',palletL:'tPL',palletW:'tPW',Pf:'tPf',Pd:'tPd',goodsH:'tGoods',load:'tLoad'};
+const DIM_IDS={slotW:'tSlotW',Wb:'tWb',Uw:'tUw',D:'tD',Bh:'tBh',h0:'tH0',hp:'tHp',topClear:'tTop',palletL:'tPL',palletW:'tPW',Pf:'tPf',Pd:'tPd',goodsH:'tGoods',load:'tLoad'};
 function getDims(id){ return dimStore[id]?{...DEF,...dimStore[id]}:{...DEF}; }
 function readDimInputs(){ const o={}; for(const k in DIM_IDS) o[k]=+$(DIM_IDS[k]).value||DEF[k]; return o; }
 function writeDimInputs(d){ for(const k in DIM_IDS) $(DIM_IDS[k]).value=d[k]; }
 function saveDims(id){ if(id) dimStore[id]=readDimInputs(); }
-function loadDims(id){ writeDimInputs(getDims(id)); }
+// dimensiunile unui raft cu latimea bay derivata din latimea unui loc de palet × nr. paleti
+function dimsForRack(id){
+  const r=rackById(id); const P=r?Math.max(1,r.pallets):1;
+  const d=getDims(id); const st=dimStore[id];
+  // migrare din datele vechi (aveau doar Wb, fara slotW): deducem latimea unui loc
+  if(st && st.slotW===undefined && st.Wb!==undefined) d.slotW=Math.round(st.Wb/P);
+  if(!d.slotW||d.slotW<=0) d.slotW=Math.round((d.Wb||DEF.Wb)/P)||DEF.slotW;
+  d.Wb=d.slotW*P;               // deschiderea totala = loc × paleti
+  return {d,P};
+}
+// actualizeaza campul (read-only) cu deschiderea totala = loc × nr. paleti
+function syncBayWidth(){
+  const id=$('dimRack').value, r=rackById(id); const P=r?Math.max(1,r.pallets):1;
+  const slot=+$('tSlotW').value||DEF.slotW;
+  $('tWb').value=slot*P;
+}
+function loadDims(id){ writeDimInputs(dimsForRack(id).d); }
 
 $('dimRack').addEventListener('input', ()=>{ loadDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); });
-$('dimInputs').addEventListener('input', ()=>{ saveDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); if(typeof saveState==='function') saveState(); });
+$('dimInputs').addEventListener('input', ()=>{ syncBayWidth(); saveDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); if(typeof saveState==='function') saveState(); });
 $('applyAll').addEventListener('click', ()=>{
   const d=readDimInputs(); readRacks().forEach(r=>dimStore[r.id]={...d});
   if(typeof saveState==='function') saveState();
@@ -890,7 +907,8 @@ function buildSVG(r,g,withTitle){
 
 // ---------- SVG schiță tehnică ----------
 function techConfig(id){
-  const r=rackById(id)||readRacks()[0]; const d=getDims(r.id);
+  const r=rackById(id)||readRacks()[0];
+  const d=dimsForRack(r.id).d;   // Wb = latime loc × nr. paleti
   return {name:r.name,N:r.levels,P:r.pallets,...d};
 }
 function buildTech(t){
@@ -931,6 +949,8 @@ function buildTech(t){
   for(let i=1;i<t.N;i++) s+=vdim(PY(heights[i-1]),PY(heights[i]),fx-16,`${Math.round(t.hp)}`);
   s+=hdim(opX0,opX0+opW,PY(Htot)-16,`${Math.round(t.Wb)}`);
   {const pw=t.Pf*S,gapp=(opW-t.P*pw)/(t.P+1),px=opX0+gapp;s+=hdim(px,px+pw,floorY+22,`${Math.round(t.Pf)}`);}
+  // cota unui singur loc de palet (deschidere / nr. paleti), sub vederea din fata
+  {const slotpx=opW/t.P; s+=hdim(opX0,opX0+slotpx,floorY+44,`loc ${Math.round(t.slotW||t.Wb/t.P)}`);}
   s+=L(sx-20,floorY,sx+sideWpx+20,floorY,'#111',2);
   s+=R(sx,PY(Htot),t.Uw*S,Htot*S,'#334155');
   s+=R(sx+t.D*S-t.Uw*S,PY(Htot),t.Uw*S,Htot*S,'#334155');
@@ -971,7 +991,7 @@ function syncSelect(sel){
   sel.innerHTML=racks.map(r=>`<option value="${r.id}">${esc(r.name)} — ${r.levels} niv × ${r.pallets} pal</option>`).join('');
   if([...sel.options].some(o=>o.value===prev)) sel.value=prev; else if(sel.options.length) sel.selectedIndex=0;
 }
-function drawDim(){ const id=$('dimRack').value; if(id) $('dimPreview').innerHTML=buildTech(techConfig(id)).svg; }
+function drawDim(){ const id=$('dimRack').value; if(id){ syncBayWidth(); $('dimPreview').innerHTML=buildTech(techConfig(id)).svg; } }
 let schemaFilterInit=false;
 function syncSchemaFilter(){
   const sel=$('schemaRackFilter'); if(!sel) return; const prev=sel.value, rs=readRacks();
