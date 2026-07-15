@@ -180,7 +180,7 @@
       <div class="field"><label>Numerotare paleți</label>
         <select id="pdir"><option value="ltr" selected>de la stânga la dreapta</option><option value="rtl">de la dreapta la stânga</option></select></div>
       <div class="field"><label>Text în celulă</label>
-        <select id="cellmode"><option value="both" selected>Palet mare + cod complet</option><option value="code">Doar codul complet</option><option value="num">Doar numărul paletului</option></select></div>
+        <select id="cellmode"><option value="both" selected>Palet mare + cod complet</option><option value="code">Doar codul complet</option><option value="num">Doar numărul paletului</option><option value="occ">Doar ocupare (culori, fără text)</option></select></div>
       <div class="field"><label>Capacitate / palet (buc)</label>
         <input id="capacity" type="number" min="0" value="0" placeholder="0 = doar ocupat/liber">
         <span class="hint">Colorează celulele după cât de pline sunt. 0 = dezactivat.</span></div>
@@ -372,6 +372,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   $('viewDim').hidden=v!=='dim';
   $('viewTech').hidden=v!=='tech';
   refresh();
+  if(v==='schema') setTimeout(fitZoom,30); // incadreaza automat pe ecran
 }));
 
 // ---------- RAFTURI (cu id stabil) ----------
@@ -754,8 +755,10 @@ function buildSVG(r,g){
       s+=`<g data-code="${esc(code)}" style="cursor:pointer">`;
       if(occ){ const fillTxt=g.cap>0?` — ${total}/${g.cap} (${Math.round(total/g.cap*100)}%)`:'';
         s+=`<title>${esc(code)}${fillTxt} — ${esc(inv.map(p=>p.produs+' ×'+p.cant).join(', '))}</title>`; }
+      else s+=`<title>${esc(code)} — liber</title>`;
       s+=`<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
-      if(g.mode==='both'){
+      if(g.mode==='occ'){ /* doar culoare, fără text (codul e in tooltip) */ }
+      else if(g.mode==='both'){
         s+=`<text x="${x+cellW/2}" y="${y+cellH/2+cellH*0.09}" text-anchor="middle" font-size="${Math.max(11,cellH*0.25)}" font-weight="700" fill="#0f172a">${esc(code)}</text>`;
       }else if(g.mode==='code'){ s+=`<text x="${x+cellW/2}" y="${y+cellH/2+codeF*0.9}" text-anchor="middle" font-size="${Math.max(9,cellH*0.2)}" font-weight="700" fill="#0f172a">${esc(code)}</text>`;}
       else{ s+=`<text x="${x+cellW/2}" y="${y+cellH/2+cellH*0.15}" text-anchor="middle" font-size="${cellH*0.42}" font-weight="800" fill="#0f172a">${esc(pal(palNo))}</text>`;}
@@ -1078,6 +1081,9 @@ $('zoom').addEventListener('input',()=>{ schemaZoom=+$('zoom').value/100; applyZ
 $('zIn').addEventListener('click',()=>{ schemaZoom=Math.min(2,schemaZoom+0.1); applyZoom(); });
 $('zOut').addEventListener('click',()=>{ schemaZoom=Math.max(0.25,schemaZoom-0.1); applyZoom(); });
 $('zFit').addEventListener('click', fitZoom);
+// incadrare automata: la schimbarea raftului afisat + la marirea/micsorarea ferestrei
+$('schemaRackFilter').addEventListener('change', ()=>setTimeout(fitZoom,30));
+let fitTimer; window.addEventListener('resize', ()=>{ clearTimeout(fitTimer); fitTimer=setTimeout(fitZoom,150); });
 
 // ---------- Persistență + sincronizare cu serverul ----------
 const KEY='schemaRaft_v1';
@@ -1171,6 +1177,7 @@ async function initApp(){
     setSyncBadge(false);
     if(!restoreState()){ addRack('A01',4,3); addRack('A02',4,3); loadDims($('dimRack').value); }
   }
+  setTimeout(fitZoom,250); // incadreaza schema pe ecran la deschidere
 }
 initApp();
 </script>
