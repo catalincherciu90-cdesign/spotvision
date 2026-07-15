@@ -58,6 +58,17 @@
   .rack-svg:last-child{margin-bottom:0}
   .rack-svg svg{height:auto;display:block;margin:0}
   #dimPreview svg{max-width:100%;height:auto;display:block;margin:0}
+  /* dimensiuni pe nivel */
+  .perlvl-toggle{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:14px;font-weight:600;color:var(--accent-d);cursor:pointer;user-select:none}
+  .perlvl-toggle input{width:auto;margin:0}
+  #levelDims{margin-top:12px}
+  #levelDims .lvhead,#levelDims .lvrow{display:grid;grid-template-columns:56px 1fr 1fr 1fr;gap:6px;align-items:center}
+  #levelDims .lvhead{margin-bottom:6px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  #levelDims .lvhead span{text-align:center}
+  #levelDims .lvhead span:first-child{text-align:left}
+  #levelDims .lvrow{margin-bottom:6px}
+  #levelDims .lvlbl{font-size:13px;font-weight:700;color:#334155}
+  #levelDims .lvrow input{padding:7px 6px;border:1px solid var(--line);border-radius:7px;font-size:13px;width:100%;background:#fff;text-align:center}
   /* schita tehnica: inaltime fixa + derulare orizontala (slide stanga-dreapta) */
   #techDraw svg{height:72vh;width:auto;max-width:none;display:block;margin:0}
   #viewTech .stage{overflow:auto}
@@ -331,9 +342,11 @@
         </div>
         <div class="row">
           <div class="field"><label>Înălțime nivel 1 (de la sol)</label><input id="tH0" type="number" value="1800"></div>
-          <div class="field"><label>Pas între niveluri</label><input id="tHp" type="number" value="1600"></div>
+          <div class="field ulevel"><label>Pas între niveluri</label><input id="tHp" type="number" value="1600"></div>
         </div>
-        <div class="field"><label>Spațiu deasupra ultimului nivel</label><input id="tTop" type="number" value="1600"></div>
+        <div class="field ulevel"><label>Spațiu deasupra ultimului nivel</label><input id="tTop" type="number" value="1600"></div>
+        <label class="perlvl-toggle"><input type="checkbox" id="tPerLevel"> Dimensiuni diferite pe nivel</label>
+        <div id="levelDims" style="display:none"></div>
       </div>
       <div class="card">
         <h2>Palet & marfă (mm)</h2>
@@ -345,11 +358,12 @@
           <div class="field"><label>Față palet (vedere din față)</label><input id="tPf" type="number" value="800"></div>
           <div class="field"><label>Adâncime palet (în raft)</label><input id="tPd" type="number" value="1200"></div>
         </div>
-        <div class="field"><label>Înălțime marfă</label><input id="tGoods" type="number" value="1200"></div>
+        <div class="field ulevel"><label>Înălțime marfă</label><input id="tGoods" type="number" value="1200"></div>
       </div>
       <div class="card">
         <h2>Capacitate</h2>
-        <div class="field"><label>Sarcină / nivel (pereche grinzi), kg</label><input id="tLoad" type="number" value="1000"></div>
+        <div class="field ulevel"><label>Sarcină / nivel (pereche grinzi), kg</label><input id="tLoad" type="number" value="1000"></div>
+        <p class="hint plonly" style="margin:0;display:none">Sarcina, înălțimea nivelului și înălțimea mărfii se setează pe fiecare nivel în tabelul „Dimensiuni pe nivel".</p>
       </div>
     </div>
   </div>
@@ -502,13 +516,81 @@ function locCode(name,L,P,g){
 }
 
 // ---------- DIMENSIUNI per raft ----------
-const DEF={slotW:900,Wb:2700,Uw:100,D:1100,Bh:120,h0:1800,hp:1600,topClear:1600,palletL:1200,palletW:800,Pf:800,Pd:1200,goodsH:1200,load:1000};
+const DEF={slotW:900,Wb:2700,Uw:100,D:1100,Bh:120,h0:1800,hp:1600,topClear:1600,palletL:1200,palletW:800,Pf:800,Pd:1200,goodsH:1200,load:1000,perLevel:0};
 const dimStore={};                       // id -> dims
 const DIM_IDS={slotW:'tSlotW',Wb:'tWb',Uw:'tUw',D:'tD',Bh:'tBh',h0:'tH0',hp:'tHp',topClear:'tTop',palletL:'tPL',palletW:'tPW',Pf:'tPf',Pd:'tPd',goodsH:'tGoods',load:'tLoad'};
 function getDims(id){ return dimStore[id]?{...DEF,...dimStore[id]}:{...DEF}; }
-function readDimInputs(){ const o={}; for(const k in DIM_IDS) o[k]=+$(DIM_IDS[k]).value||DEF[k]; return o; }
-function writeDimInputs(d){ for(const k in DIM_IDS) $(DIM_IDS[k]).value=d[k]; }
+function readDimInputs(){
+  const o={}; for(const k in DIM_IDS) o[k]=+$(DIM_IDS[k]).value||DEF[k];
+  o.perLevel=$('tPerLevel')&&$('tPerLevel').checked?1:0;
+  const rows=document.querySelectorAll('#levelDims .lvrow');
+  if(o.perLevel && rows.length){ const a=readLevelDims(); o.levelH=a.H; o.levelLoad=a.LD; o.levelGoods=a.GD; }
+  else { const prev=dimStore[$('dimRack').value]; if(prev){ o.levelH=prev.levelH; o.levelLoad=prev.levelLoad; o.levelGoods=prev.levelGoods; } }
+  return o;
+}
+function writeDimInputs(d){ for(const k in DIM_IDS) $(DIM_IDS[k]).value=d[k]; if($('tPerLevel')) $('tPerLevel').checked=!!d.perLevel; }
 function saveDims(id){ if(id) dimStore[id]=readDimInputs(); }
+// citeste randurile din tabelul de dimensiuni pe nivel
+function readLevelDims(){
+  const H=[],LD=[],GD=[];
+  document.querySelectorAll('#levelDims .lvrow').forEach(r=>{
+    H.push(+r.querySelector('.lv-h').value||0);
+    LD.push(+r.querySelector('.lv-load').value||0);
+    GD.push(+r.querySelector('.lv-goods').value||0);
+  });
+  return {H,LD,GD};
+}
+// construieste array-uri de lungime N pentru inaltime/sarcina/marfa pe nivel
+function levelArrays(d,N){
+  const num=(v,f)=>{ v=+v; return v>0?v:f; };
+  const useStored = d.perLevel && Array.isArray(d.levelH);
+  const H=[],LD=[],GD=[];
+  for(let i=0;i<N;i++){
+    if(useStored){
+      H.push(num(d.levelH&&d.levelH[i], i<N-1?d.hp:d.topClear));
+      LD.push(num(d.levelLoad&&d.levelLoad[i], d.load));
+      GD.push(num(d.levelGoods&&d.levelGoods[i], d.goodsH));
+    }else{
+      H.push(i<N-1?d.hp:d.topClear); LD.push(d.load); GD.push(d.goodsH);
+    }
+  }
+  return {H,LD,GD};
+}
+// afiseaza/ascunde campurile uniforme vs. tabelul pe nivel
+function toggleUniformFields(showUniform){
+  document.querySelectorAll('#dimInputs .ulevel').forEach(el=>el.style.display=showUniform?'':'none');
+  document.querySelectorAll('#dimInputs .plonly').forEach(el=>el.style.display=showUniform?'none':'');
+}
+// randeaza tabelul cu un rand pe fiecare nivel
+function renderLevelDims(id,N){
+  const box=$('levelDims'); if(!box) return;
+  // pre-completare din valorile pe nivel salvate (daca exista), altfel din cele uniforme
+  const d=getDims(id), num=(v,f)=>{v=+v;return v>0?v:f;};
+  const H=[],LD=[],GD=[];
+  for(let i=0;i<N;i++){
+    H.push(num(Array.isArray(d.levelH)?d.levelH[i]:undefined, i<N-1?d.hp:d.topClear));
+    LD.push(num(Array.isArray(d.levelLoad)?d.levelLoad[i]:undefined, d.load));
+    GD.push(num(Array.isArray(d.levelGoods)?d.levelGoods[i]:undefined, d.goodsH));
+  }
+  let h=`<div class="lvhead"><span>Nivel</span><span>Înălț. (mm)</span><span>Sarcină (kg)</span><span>Marfă (mm)</span></div>`;
+  for(let i=0;i<N;i++){
+    h+=`<div class="lvrow" data-i="${i}"><div class="lvlbl">${i+1}</div>`
+      +`<input class="lv-h" type="number" value="${H[i]}" title="Înălțime nivel ${i+1}">`
+      +`<input class="lv-load" type="number" value="${LD[i]}" title="Sarcină nivel ${i+1}">`
+      +`<input class="lv-goods" type="number" value="${GD[i]}" title="Înălțime marfă nivel ${i+1}"></div>`;
+  }
+  box.innerHTML=h;
+}
+// sincronizeaza vizibilitatea si nr. de randuri cu starea curenta
+function syncLevelDims(id){
+  const r=rackById(id); const N=r?Math.max(1,r.levels):1;
+  const on=$('tPerLevel')&&$('tPerLevel').checked;
+  const box=$('levelDims'); if(!box) return;
+  toggleUniformFields(!on);
+  box.style.display=on?'block':'none';
+  if(!on){ box.innerHTML=''; return; }
+  if(box.querySelectorAll('.lvrow').length!==N) renderLevelDims(id,N);
+}
 // dimensiunile unui raft cu latimea bay derivata din latimea unui loc de palet × nr. paleti
 function dimsForRack(id){
   const r=rackById(id); const P=r?Math.max(1,r.pallets):1;
@@ -525,10 +607,12 @@ function syncBayWidth(){
   const slot=+$('tSlotW').value||DEF.slotW;
   $('tWb').value=slot*P;
 }
-function loadDims(id){ writeDimInputs(dimsForRack(id).d); }
+function loadDims(id){ writeDimInputs(dimsForRack(id).d); syncLevelDims(id); }
 
 $('dimRack').addEventListener('input', ()=>{ loadDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); });
-$('dimInputs').addEventListener('input', ()=>{ syncBayWidth(); saveDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); if(typeof saveState==='function') saveState(); });
+$('dimInputs').addEventListener('input', e=>{ syncBayWidth(); saveDims($('dimRack').value); if(!$('viewDim').hidden) drawDim(); if(typeof saveState==='function') saveState(); });
+// comutatorul „dimensiuni diferite pe nivel"
+$('tPerLevel').addEventListener('change', ()=>{ const id=$('dimRack').value; syncLevelDims(id); saveDims(id); if(!$('viewDim').hidden) drawDim(); if(typeof saveState==='function') saveState(); });
 $('applyAll').addEventListener('click', ()=>{
   const d=readDimInputs(); readRacks().forEach(r=>dimStore[r.id]={...d});
   if(typeof saveState==='function') saveState();
@@ -909,11 +993,14 @@ function buildSVG(r,g,withTitle){
 function techConfig(id){
   const r=rackById(id)||readRacks()[0];
   const d=dimsForRack(r.id).d;   // Wb = latime loc × nr. paleti
-  return {name:r.name,N:r.levels,P:r.pallets,...d};
+  const {H,LD,GD}=levelArrays(d,r.levels);   // inaltime/sarcina/marfa pe nivel
+  return {name:r.name,N:r.levels,P:r.pallets,...d,LH:H,LLD:LD,LGD:GD};
 }
 function buildTech(t){
-  const heights=[]; for(let i=1;i<=t.N;i++) heights.push(t.h0+(i-1)*t.hp);
-  const Htot=heights[t.N-1]+t.topClear;
+  const LH=t.LH||[], LGD=t.LGD||[], LLD=t.LLD||[];
+  const lh=i=>+LH[i]||(i<t.N-1?t.hp:t.topClear), gh=i=>+LGD[i]||t.goodsH;
+  const heights=[]; { let acc=t.h0; for(let i=0;i<t.N;i++){ if(i>0) acc+=lh(i-1); heights.push(acc); } }
+  const Htot=heights[t.N-1]+lh(t.N-1);
   const frontWmm=2*t.Uw+t.Wb, sideWmm=t.D;
   const ML=95,MT=115,MR=45,GAP=110,MB=80,DETAIL=260;
   let S=Math.min(560/Htot,(940-GAP)/(frontWmm+sideWmm),0.16);
@@ -938,15 +1025,16 @@ function buildTech(t){
   s+=R(fx,PY(Htot),t.Uw*S,Htot*S,'#334155');
   s+=R(fx+(t.Uw+t.Wb)*S,PY(Htot),t.Uw*S,Htot*S,'#334155');
   const opX0=fx+t.Uw*S,opW=t.Wb*S;
-  for(let i=0;i<t.N;i++){const hy=PY(heights[i]);
+  for(let i=0;i<t.N;i++){const hy=PY(heights[i]);const gH=gh(i);
     s+=R(opX0,hy-t.Bh*S,opW,t.Bh*S,'#e28413','#b45309',0.5);
     const pw=t.Pf*S,gapp=(opW-t.P*pw)/(t.P+1);
     for(let k=0;k<t.P;k++){const px=opX0+gapp*(k+1)+pw*k,deck=90*S;
-      s+=R(px,hy-t.Bh*S-t.goodsH*S-deck,pw,t.goodsH*S,'#dbeafe','#93c5fd',0.5);
+      s+=R(px,hy-t.Bh*S-gH*S-deck,pw,gH*S,'#dbeafe','#93c5fd',0.5);
       s+=R(px,hy-t.Bh*S-deck,pw,deck,'#a8825a','#6b4f2a',0.5);}}
   s+=vdim(PY(Htot),floorY,fx-40,`${Math.round(Htot)}`);
-  s+=vdim(floorY,PY(t.h0),fx-16,`${Math.round(t.h0)}`);
-  for(let i=1;i<t.N;i++) s+=vdim(PY(heights[i-1]),PY(heights[i]),fx-16,`${Math.round(t.hp)}`);
+  s+=vdim(floorY,PY(heights[0]),fx-16,`${Math.round(t.h0)}`);
+  for(let i=1;i<t.N;i++) s+=vdim(PY(heights[i-1]),PY(heights[i]),fx-16,`${Math.round(lh(i-1))}`);
+  s+=vdim(PY(heights[t.N-1]),PY(Htot),fx-16,`${Math.round(lh(t.N-1))}`);
   s+=hdim(opX0,opX0+opW,PY(Htot)-16,`${Math.round(t.Wb)}`);
   {const pw=t.Pf*S,gapp=(opW-t.P*pw)/(t.P+1),px=opX0+gapp;s+=hdim(px,px+pw,floorY+22,`${Math.round(t.Pf)}`);}
   // cota unui singur loc de palet (deschidere / nr. paleti), sub vederea din fata
@@ -955,11 +1043,11 @@ function buildTech(t){
   s+=R(sx,PY(Htot),t.Uw*S,Htot*S,'#334155');
   s+=R(sx+t.D*S-t.Uw*S,PY(Htot),t.Uw*S,Htot*S,'#334155');
   for(let i=0;i<t.N-1;i++) s+=L(sx+t.Uw*S,PY(heights[i]),sx+t.D*S-t.Uw*S,PY(heights[i+1]),'#64748b',1.2);
-  for(let i=0;i<t.N;i++){const hy=PY(heights[i]);
+  for(let i=0;i<t.N;i++){const hy=PY(heights[i]);const gH=gh(i);
     s+=R(sx+t.Uw*S*0.2,hy-t.Bh*S,t.Bh*S,t.Bh*S,'#e28413','#b45309',0.5);
     s+=R(sx+t.D*S-t.Uw*S*0.2-t.Bh*S,hy-t.Bh*S,t.Bh*S,t.Bh*S,'#e28413','#b45309',0.5);
     const pdpx=t.Pd*S,cx=sx+(t.D*S-pdpx)/2,deck=90*S;
-    s+=R(cx,hy-t.Bh*S-t.goodsH*S-deck,pdpx,t.goodsH*S,'#dbeafe','#93c5fd',0.5);
+    s+=R(cx,hy-t.Bh*S-gH*S-deck,pdpx,gH*S,'#dbeafe','#93c5fd',0.5);
     s+=R(cx,hy-t.Bh*S-deck,pdpx,deck,'#a8825a','#6b4f2a',0.5);}
   s+=hdim(sx,sx+t.D*S,PY(Htot)-16,`${Math.round(t.D)}`);
   s+=vdim(PY(Htot),floorY,sx+sideWpx+26,`${Math.round(Htot)}`);
@@ -973,8 +1061,10 @@ function buildTech(t){
   s+=T(dx+plw+16,dY+plh/2,`Palet ${t.palletL}×${t.palletW} mm`,12,'start',400,'#475569');
   const tx=sx,tY=floorY+MB+40,rowH=26,colW=[210,150],tw=colW[0]+colW[1];
   s+=T(tx,tY-26,'CAPACITĂȚI',13,'start',700,'#334155');
+  const loadArr=[]; for(let i=0;i<t.N;i++) loadArr.push(+LLD[i]||t.load);
+  const totLoad=loadArr.reduce((a,b)=>a+b,0), uniformLoad=loadArr.every(v=>v===loadArr[0]);
   const rows=[['Număr niveluri',`${t.N}`],['Paleți / nivel',`${t.P}`],['Total locații palet',`${t.N*t.P}`],
-    ['Sarcină / nivel (pereche grinzi)',`${t.load} kg`],['Sarcină totală raft',`${t.load*t.N} kg`],
+    ['Sarcină / nivel (pereche grinzi)',uniformLoad?`${loadArr[0]} kg`:'variabil pe nivel'],['Sarcină totală raft',`${totLoad} kg`],
     ['Gabarit (L×A×Î)',`${Math.round(frontWmm)}×${t.D}×${Math.round(Htot)}`]];
   s+=R(tx,tY,tw,rowH*rows.length,'#fff','#cbd5e1',1);
   rows.forEach((r,i)=>{const yy=tY+i*rowH; if(i%2) s+=R(tx,yy,tw,rowH,'#f8fafc','',0);
@@ -991,7 +1081,7 @@ function syncSelect(sel){
   sel.innerHTML=racks.map(r=>`<option value="${r.id}">${esc(r.name)} — ${r.levels} niv × ${r.pallets} pal</option>`).join('');
   if([...sel.options].some(o=>o.value===prev)) sel.value=prev; else if(sel.options.length) sel.selectedIndex=0;
 }
-function drawDim(){ const id=$('dimRack').value; if(id){ syncBayWidth(); $('dimPreview').innerHTML=buildTech(techConfig(id)).svg; } }
+function drawDim(){ const id=$('dimRack').value; if(id){ syncBayWidth(); syncLevelDims(id); $('dimPreview').innerHTML=buildTech(techConfig(id)).svg; } }
 let schemaFilterInit=false;
 function syncSchemaFilter(){
   const sel=$('schemaRackFilter'); if(!sel) return; const prev=sel.value, rs=readRacks();
