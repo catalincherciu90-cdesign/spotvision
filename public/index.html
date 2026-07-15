@@ -169,8 +169,8 @@
       </div>
       <div class="field"><label>Ordine în cod</label>
         <select id="codeorder">
-          <option value="lp" selected>Nivel, apoi palet (A01-N01-R01)</option>
-          <option value="pl">Palet, apoi nivel (A01-R01-N01)</option>
+          <option value="lp">Nivel, apoi palet (A01-N01-R01)</option>
+          <option value="pl" selected>Palet, apoi nivel (A01-R01-N01)</option>
         </select></div>
     </div>
     <div class="card">
@@ -404,10 +404,11 @@ function readRacks(){
   }));
 }
 function rackById(id){ return readRacks().find(r=>r.id===id); }
+let orderMigrated=false; // marcaj: noul format implicit (palet-nivel) a fost aplicat
 function globals(){
   return {ldig:+$('ldig').value||2,pdig:+$('pdig').value||2,sep:$('sep').value.trim()||'-',
     lpref:$('lpref').value,ppref:$('ppref').value,base:$('base').value,pdir:$('pdir').value,mode:$('cellmode').value,
-    cap:+$('capacity').value||0, order:($('codeorder')?$('codeorder').value:'lp')||'lp'};
+    cap:+$('capacity').value||0, order:($('codeorder')?$('codeorder').value:'pl')||'pl', omig:orderMigrated};
 }
 // Generează codul de locație respectând ordinea (nivel-palet sau palet-nivel).
 function locCode(name,L,P,g){
@@ -1060,6 +1061,19 @@ function applyState(st){
   racks.forEach(r=>{ const id=addRackRaw(r.name,r.levels,r.pallets); if(r.dims) dimStore[id]={...DEF,...r.dims}; });
   for(const k in inventory) delete inventory[k];
   const inv=st.inv||{}; Object.keys(inv).forEach(k=>inventory[k.toUpperCase()]=inv[k]);
+  // Migrare o singură dată: noul format implicit e palet-nivel. Dacă în config nu e marcată
+  // migrarea (deci ordinea salvată era vechiul implicit nivel-palet), o forțăm acum și
+  // re-cheiem inventarul existent la noul format.
+  if(g.omig){ orderMigrated=true; }
+  else {
+    orderMigrated=true; if($('codeorder')) $('codeorder').value='pl';
+    const gg=globals(), fresh={};
+    Object.keys(inventory).forEach(code=>{ const info=parseLoc(code,gg);
+      const key=info?locCode(info.name,info.L,info.P,gg):code; (fresh[key]=fresh[key]||[]).push(...inventory[code]); });
+    for(const k in inventory) delete inventory[k];
+    Object.keys(fresh).forEach(k=>inventory[k]=fresh[k]);
+    if(SERVER) pushAllInventory();
+  }
   refresh(); loadDims($('dimRack').value); return true;
 }
 function saveState(){ try{ localStorage.setItem(KEY, JSON.stringify(currentState())); }catch(e){} pushConfig(); }
