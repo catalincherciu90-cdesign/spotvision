@@ -63,6 +63,10 @@
   #viewTech .stage{overflow:auto}
   /* schema locatii: inaltime fixa + derulare orizontala (slide stanga-dreapta), ca la schita */
   #viewSchema .stage{height:78vh}
+  /* drag stanga-dreapta cu mouse-ul (apuci si tragi) */
+  #viewSchema .stage,#viewTech .stage{cursor:grab}
+  #viewSchema .stage.grabbing,#viewTech .stage.grabbing{cursor:grabbing;user-select:none}
+  #viewSchema .stage.grabbing svg,#viewTech .stage.grabbing svg{pointer-events:none}
   .zoombar{display:flex;align-items:center;gap:8px;margin:0 0 12px}
   .zoombar button{width:32px;height:32px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-size:16px;font-weight:700}
   .zoombar #zFit{width:auto;padding:0 12px;font-size:13px}
@@ -561,6 +565,32 @@ function showLoc(code){
   refresh();
 }
 $('schema').addEventListener('click', e=>{ const g=e.target.closest('[data-code]'); if(g) showLoc(g.getAttribute('data-code')); });
+// drag stanga-dreapta cu mouse-ul pe zona de schema / schita (pe touch ramane swipe nativ)
+function attachDragPan(stage){
+  if(!stage) return;
+  let down=false, moved=false, sx=0, sy=0, sl=0, st=0;
+  stage.addEventListener('pointerdown', e=>{
+    if(e.pointerType==='touch') return;
+    down=true; moved=false; sx=e.clientX; sy=e.clientY; sl=stage.scrollLeft; st=stage.scrollTop;
+  });
+  stage.addEventListener('pointermove', e=>{
+    if(!down) return;
+    const dx=e.clientX-sx, dy=e.clientY-sy;
+    if(!moved && (Math.abs(dx)>4||Math.abs(dy)>4)){
+      moved=true; stage.classList.add('grabbing');
+      // capturam abia acum, ca un click simplu sa ajunga normal la celula
+      try{ stage.setPointerCapture(e.pointerId); }catch(_){}
+    }
+    if(moved){ stage.scrollLeft=sl-dx; stage.scrollTop=st-dy; }
+  });
+  const end=e=>{ if(!down) return; down=false; stage.classList.remove('grabbing'); try{ stage.releasePointerCapture(e.pointerId); }catch(_){} };
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+  // daca a fost drag (nu simplu click), nu deschide detaliile celulei
+  stage.addEventListener('click', e=>{ if(moved){ e.stopPropagation(); e.preventDefault(); moved=false; } }, true);
+}
+attachDragPan(document.querySelector('#viewSchema .stage'));
+attachDragPan(document.querySelector('#viewTech .stage'));
 $('locPanel').addEventListener('click', e=>{
   if(e.target.classList.contains('close')){ $('locPanel').style.display='none'; selectedCode=''; refresh(); return; }
   if(e.target.classList.contains('delp')){
