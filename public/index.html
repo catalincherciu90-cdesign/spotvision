@@ -63,6 +63,12 @@
   #viewTech .stage{overflow:auto}
   /* schema locatii: inaltime fixa + derulare orizontala (slide stanga-dreapta), ca la schita */
   #viewSchema .stage{height:78vh}
+  /* titlul raftului, fix deasupra schemei */
+  .schematitle{text-align:center;margin:2px 0 12px}
+  .schematitle .st-name{font-size:26px;font-weight:800;color:#111827;line-height:1.15}
+  .schematitle .st-load{font-size:15px;font-weight:600;color:#475569;margin-top:2px}
+  .schematitle .st-bar{height:9px;border-radius:5px;background:#e5e7eb;max-width:340px;margin:9px auto 0;overflow:hidden}
+  .schematitle .st-bar i{display:block;height:100%;border-radius:5px;transition:width .2s}
   /* drag stanga-dreapta cu mouse-ul (apuci si tragi) */
   #viewSchema .stage,#viewTech .stage{cursor:grab}
   #viewSchema .stage.grabbing,#viewTech .stage.grabbing{cursor:grabbing;user-select:none}
@@ -295,6 +301,7 @@
       <button id="zFit" title="Încadrează în lățime">Potrivește</button>
     </div>
     <div id="locPanel" class="card noprint" style="display:none"></div>
+    <div id="schemaTitle" class="schematitle" style="display:none"></div>
     <div class="stage"><div id="schema"></div></div>
   </div>
 </div>
@@ -820,10 +827,11 @@ function occColors(occ,total,cap){
   if(r<0.999) return {fill:'#ffedd5',stroke:'#f97316'};       // aproape plin
   return {fill:'#fee2e2',stroke:'#ef4444'};                    // plin
 }
-function buildSVG(r,g){
+function buildSVG(r,g,withTitle){
+  if(withTitle===undefined) withTitle=true;
   const many = r.pallets>14 || r.levels>14;
   const cellW = many?94:140, cellH = many?58:82;
-  const labelW = many?58:84, titleH=76, headH = 10, padd=18;
+  const labelW = many?58:84, titleH=withTitle?76:6, headH = 10, padd=18;
   const gridW=r.pallets*cellW,gridH=r.levels*cellH;
   const W=labelW+gridW+padd*2,H=titleH+headH+gridH+padd*2;
   const gx=padd+labelW,gy=padd+titleH+headH;
@@ -832,16 +840,19 @@ function buildSVG(r,g){
   const numF=cellH*0.36, codeF=Math.max(8,cellH*0.165), hdrF=Math.max(9,Math.min(16,cellH*0.28)), levF=Math.max(11,Math.min(20,cellH*0.32));
   let s=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="Arial, Helvetica, sans-serif">`;
   s+=`<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
-  s+=`<text x="${W/2}" y="${padd+28}" text-anchor="middle" font-size="28" font-weight="800" fill="#111827">Raft ${esc(r.name)}</text>`;
-  // nivel de încărcare al raftului (poziții ocupate / total) — afișat mereu
+  // nivel de încărcare al raftului (poziții ocupate / total)
   let occCells=0; const totCells=r.levels*r.pallets;
   for(let L=1;L<=r.levels;L++) for(let j=1;j<=r.pallets;j++){ const iv=invByCode(locCode(r.name,L,j,g)); if(iv&&iv.length) occCells++; }
   const loadPct=totCells?Math.round(occCells/totCells*100):0;
   const loadCol=loadPct>=90?'#ef4444':loadPct>=60?'#f59e0b':(loadPct>0?'#22c55e':'#94a3b8');
-  s+=`<text x="${W/2}" y="${padd+50}" text-anchor="middle" font-size="15" font-weight="600" fill="#475569">Încărcare: ${occCells}/${totCells} poziții (${loadPct}%)</text>`;
-  const barW=Math.min(340,Math.max(160,gridW*0.5)), barX=(W-barW)/2, barY=padd+58, barH=9;
-  s+=`<rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${barH/2}" fill="#e5e7eb"/>`;
-  if(loadPct>0) s+=`<rect x="${barX}" y="${barY}" width="${(barW*loadPct/100).toFixed(1)}" height="${barH}" rx="${barH/2}" fill="${loadCol}"/>`;
+  // titlul (nume raft + încărcare + bara) e desenat in SVG doar cand NU e afisat deasupra ca HTML
+  if(withTitle){
+    s+=`<text x="${W/2}" y="${padd+28}" text-anchor="middle" font-size="28" font-weight="800" fill="#111827">Raft ${esc(r.name)}</text>`;
+    s+=`<text x="${W/2}" y="${padd+50}" text-anchor="middle" font-size="15" font-weight="600" fill="#475569">Încărcare: ${occCells}/${totCells} poziții (${loadPct}%)</text>`;
+    const barW=Math.min(340,Math.max(160,gridW*0.5)), barX=(W-barW)/2, barY=padd+58, barH=9;
+    s+=`<rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${barH/2}" fill="#e5e7eb"/>`;
+    if(loadPct>0) s+=`<rect x="${barX}" y="${barY}" width="${(barW*loadPct/100).toFixed(1)}" height="${barH}" rx="${barH/2}" fill="${loadCol}"/>`;
+  }
   for(let L=1;L<=r.levels;L++){const rowTop=g.base==='bottom'?(r.levels-L):(L-1);const y=gy+rowTop*cellH;
     s+=`<text x="${padd+labelW-10}" y="${y+cellH/2+levF*0.35}" text-anchor="end" font-size="${levF}" font-weight="800" fill="#111827">${esc(lev(L))}</text>`;
     for(let j=1;j<=r.pallets;j++){const palNo=g.pdir==='ltr'?j:(r.pallets-j+1);const x=gx+(j-1)*cellW;
@@ -972,7 +983,22 @@ function syncSchemaFilter(){
 function schemaHTML(){
   const g=globals(), rs=readRacks(), f=$('schemaRackFilter')?$('schemaRackFilter').value:'all';
   const shown=(f==='all')?rs:rs.filter(r=>r.id===f);
-  return shown.map(r=>`<div class="rack-svg">${buildSVG(r,g).svg}</div>`).join('');
+  const single=shown.length===1;
+  updateSchemaTitle(single?shown[0]:null, g);
+  return shown.map(r=>`<div class="rack-svg">${buildSVG(r,g,!single).svg}</div>`).join('');
+}
+// titlul raftului afisat deasupra schemei (HTML fix), doar cand se vede un singur raft
+function updateSchemaTitle(r,g){
+  const el=$('schemaTitle'); if(!el) return;
+  if(!r){ el.style.display='none'; el.innerHTML=''; return; }
+  let occ=0; const tot=r.levels*r.pallets;
+  for(let L=1;L<=r.levels;L++) for(let j=1;j<=r.pallets;j++){ const iv=invByCode(locCode(r.name,L,j,g)); if(iv&&iv.length) occ++; }
+  const pct=tot?Math.round(occ/tot*100):0;
+  const col=pct>=90?'#ef4444':pct>=60?'#f59e0b':(pct>0?'#22c55e':'#94a3b8');
+  el.innerHTML=`<div class="st-name">Raft ${esc(r.name)}</div>`
+    +`<div class="st-load">Încărcare: ${occ}/${tot} poziții (${pct}%)</div>`
+    +`<div class="st-bar"><i style="width:${pct}%;background:${col}"></i></div>`;
+  el.style.display='block';
 }
 function renderLegend(g){
   const lg=$('legend'); if(!lg) return;
