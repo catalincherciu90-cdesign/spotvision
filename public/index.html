@@ -55,12 +55,14 @@
   .total small{display:block;font-size:13px;font-weight:400;color:var(--muted)}
   .stage{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;overflow:auto}
   .rack-svg{margin-bottom:26px}
+  .rack-svg:last-child{margin-bottom:0}
   .rack-svg svg{height:auto;display:block;margin:0}
   #dimPreview svg{max-width:100%;height:auto;display:block;margin:0}
   /* schita tehnica: inaltime fixa + derulare orizontala (slide stanga-dreapta) */
   #techDraw svg{height:72vh;width:auto;max-width:none;display:block;margin:0}
   #viewTech .stage{overflow:auto}
-  #viewSchema .stage{max-height:78vh}
+  /* schema locatii: inaltime fixa + derulare orizontala (slide stanga-dreapta), ca la schita */
+  #viewSchema .stage{height:78vh}
   .zoombar{display:flex;align-items:center;gap:8px;margin:0 0 12px}
   .zoombar button{width:32px;height:32px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-size:16px;font-weight:700}
   .zoombar #zFit{width:auto;padding:0 12px;font-size:13px}
@@ -118,7 +120,7 @@
     .wrap{padding:12px;gap:14px}
     .card{padding:14px;margin-bottom:14px}
     .stage{padding:12px}
-    #viewSchema .stage{max-height:70vh}
+    #viewSchema .stage{height:68vh}
     /* inputuri 16px = fara zoom automat pe iaptop/iPhone la focus */
     .field input,.field select,.prow input,.invsearchbar input,.rackfilter select{font-size:16px}
     /* editor produs: nume pe tot randul, restul se aseaza pe randuri */
@@ -148,7 +150,7 @@
     .rack-svg{margin:0;page-break-after:always;break-after:page}
     .rack-svg svg{width:auto!important;max-width:100%!important}
     #techDraw svg{height:auto!important;width:auto!important;max-width:100%!important}
-    #viewSchema .stage{max-height:none}
+    #viewSchema .stage{height:auto}
     .noprint{display:none!important}
   }
 </style>
@@ -1144,7 +1146,15 @@ function applyZoom(){
 }
 function fitZoom(){
   const stage=document.querySelector('#viewSchema .stage'), svgs=[...document.querySelectorAll('#schema svg')];
-  if(!svgs.length||!stage) return; let maxW=0; svgs.forEach(s=>{const vb=s.viewBox.baseVal; if(vb) maxW=Math.max(maxW,vb.width);});
+  if(!svgs.length||!stage) return;
+  if(svgs.length===1){
+    // un singur raft: potriveste pe INALTIME (umple stage-ul pe verticala) si dai slide stanga-dreapta
+    const vb=svgs[0].viewBox.baseVal;
+    if(vb&&vb.height){ schemaZoom=Math.max(0.05,Math.min(2,(stage.clientHeight-48)/vb.height)); applyZoom(); }
+    return;
+  }
+  // mai multe rafturi: potriveste pe latime (se aseaza unul sub altul)
+  let maxW=0; svgs.forEach(s=>{const vb=s.viewBox.baseVal; if(vb) maxW=Math.max(maxW,vb.width);});
   if(maxW>0){ schemaZoom=Math.max(0.05,Math.min(2,(stage.clientWidth-40)/maxW)); applyZoom(); }
 }
 $('zoom').addEventListener('input',()=>{ schemaZoom=+$('zoom').value/100; applyZoom(); });
