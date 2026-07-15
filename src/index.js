@@ -129,6 +129,23 @@ async function userCount(env) {
   return row ? row.n : 0;
 }
 
+// ---- roluri: admin | operator | viewer ----
+const ROLES = ['admin', 'operator', 'viewer'];
+let roleColReady = false;
+async function ensureRole(env) {
+  if (roleColReady) return;
+  try {
+    await env.DB.prepare("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'operator'").run();
+    // coloana tocmai adaugata -> userii de dinainte de roluri aveau acces total => admini
+    await env.DB.prepare("UPDATE users SET role = 'admin'").run();
+  } catch (e) { /* coloana exista deja */ }
+  roleColReady = true;
+}
+async function getRole(env, id) {
+  const r = await env.DB.prepare('SELECT role FROM users WHERE id = ?1').bind(id).first();
+  return r ? (r.role || 'operator') : null;
+}
+
 // ---- rate limit (best-effort, per-izolat) ----
 const rl = new Map();
 function tooMany(key, max, windowMs) {
@@ -161,31 +178,37 @@ export default {
 
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
+    if (p.startsWith('/api/')) await ensureRole(env);
+
     // ---------- rute publice de auth ----------
     if (p === '/api/auth-status' && method === 'GET') {
       const session = await getSession(req, env);
       const setup = (await userCount(env)) === 0;
-      return json({ setup, authenticated: !!session, id: session ? session.sub : null });
+      const role = session ? await getRole(env, session.sub) : null;
+      return json({ setup, authenticated: !!session, id: session ? session.sub : null, role });
     }
 
     if (p === '/api/register' && method === 'POST') {
       if (tooMany(`reg:${ip}`, 10, 5 * 60000)) return json({ error: 'Prea multe încercări. Revino în câteva minute.' }, 429);
-      const { id, password } = await readBody(req);
+      const { id, password, role } = await readBody(req);
       const uid = String(id || '').trim();
       if (!uid || !password) return json({ error: 'Id și parolă obligatorii.' }, 400);
       if (String(password).length < 4) return json({ error: 'Parola trebuie să aibă minim 4 caractere.' }, 400);
 
       const count = await userCount(env);
       const session = await getSession(req, env);
-      // primul cont e liber (bootstrap admin); ulterior doar utilizatori autentificati pot adauga colegi
+      // primul cont e liber (bootstrap admin); ulterior doar ADMINII pot adauga colegi
       if (count > 0 && !session) return json({ error: 'Trebuie să fii autentificat ca să adaugi conturi.' }, 401);
+      if (count > 0 && (await getRole(env, session.sub)) !== 'admin') return json({ error: 'Doar administratorii pot adăuga utilizatori.' }, 403);
 
       const exists = await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(uid).first();
       if (exists) return json({ error: 'Există deja un cont cu acest id.' }, 409);
 
+      // primul cont = admin; urmatoarele = rolul ales (implicit operator)
+      const newRole = count === 0 ? 'admin' : (ROLES.includes(role) ? role : 'operator');
       const hash = await hashPassword(String(password));
-      await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at) VALUES (?1, ?2, ?3)')
-        .bind(uid, hash, Date.now()).run();
+      await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role) VALUES (?1, ?2, ?3, ?4)')
+        .bind(uid, hash, Date.now(), newRole).run();
 
       // la bootstrap (primul cont) auto-login
       if (count === 0) {
@@ -213,18 +236,20 @@ export default {
 
     // ---------- de aici incolo: totul cere sesiune ----------
     const session = await getSession(req, env);
+    const myRole = session ? await getRole(env, session.sub) : null;
 
     // gestionare utilizatori
     if (p === '/api/users') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
       if (method === 'GET') {
-        const { results } = await env.DB.prepare('SELECT id, created_at FROM users ORDER BY created_at').all();
-        return json({ users: results || [], me: session.sub });
+        const { results } = await env.DB.prepare('SELECT id, created_at, role FROM users ORDER BY created_at').all();
+        return json({ users: results || [], me: session.sub, myRole });
       }
     }
     const mUser = p.match(/^\/api\/users\/(.+)$/);
     if (mUser && method === 'DELETE') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
+      if (myRole !== 'admin') return json({ error: 'Doar administratorii pot șterge utilizatori.' }, 403);
       const target = decodeURIComponent(mUser[1]);
       if ((await userCount(env)) <= 1) return json({ error: 'Nu poți șterge ultimul cont.' }, 400);
       await env.DB.prepare('DELETE FROM users WHERE id = ?1').bind(target).run();
@@ -235,6 +260,8 @@ export default {
     // ---------- API date aplicatie (protejat) ----------
     if (p.startsWith('/api/')) {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
+      // rolul 'viewer' = doar citire: orice scriere e blocata
+      if (method !== 'GET' && myRole === 'viewer') return json({ error: 'Cont de vizualizare — doar citire.' }, 403);
       try {
         if (p === '/api/data' && method === 'GET') {
           const cfg = await getConfig(env);
