@@ -319,7 +319,7 @@
   </div>
   <div>
     <div id="fifoResult" class="card noprint" style="display:none"></div>
-    <div class="invsearchbar noprint"><input id="invSearch" placeholder="🔎 Caută cod locație (ex. E04) — click pe cod te duce pe schemă"></div>
+    <div class="invsearchbar noprint"><input id="invSearch" placeholder="🔎 Caută locație, produs sau cod produs (ex. E04, Cutii, SKU-100) — click pe cod te duce pe schemă"></div>
     <p class="sub noprint">Toate produsele înregistrate — <span id="invSummary">0 locații, 0 produse</span>. <b>Click pe un cod = salt pe schemă.</b></p>
     <div class="stage"><div id="invTableWrap"></div></div>
   </div>
@@ -614,11 +614,12 @@ let invCodeQuery='';
 function renderInvTable(){
   const all=Object.keys(inventory).filter(k=>inventory[k]&&inventory[k].length).sort();
   const q=invCodeQuery.toUpperCase();
-  const codes=q?all.filter(k=>k.includes(q)):all;
+  const matchLoc=k=> k.includes(q) || (inventory[k]||[]).some(p=>(p.produs||'').toUpperCase().includes(q)||(p.cod||'').toUpperCase().includes(q));
+  const codes=q?all.filter(matchLoc):all;
   let items=0; all.forEach(k=>items+=inventory[k].length);
   $('invSummary').textContent=q?`${codes.length} din ${all.length} locații (filtru: ${esc(invCodeQuery)})`:`${all.length} locații, ${items} produse`;
   updateProductList();
-  if(!codes.length){ $('invTableWrap').innerHTML='<div class="empty">'+(q?'Nicio locație cu acest cod.':'Niciun produs încă. Alege o locație și adaugă produse.')+'</div>'; return; }
+  if(!codes.length){ $('invTableWrap').innerHTML='<div class="empty">'+(q?'Nimic găsit pentru „'+esc(invCodeQuery)+'" (locație, produs sau cod).':'Niciun produs încă. Alege o locație și adaugă produse.')+'</div>'; return; }
   let h='<table><thead><tr><th>Locație</th><th>Cod</th><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>';
   codes.forEach(code=>{ inventory[code].slice().sort(byFifo).forEach((p,i)=>{
     h+=`<tr class="${i===0?'loc':''}"><td>${i===0?`<span class="code" data-code="${esc(code)}">${esc(code)}</span>`:''}</td><td>${esc(p.cod||'—')}</td><td>${esc(p.produs)}</td><td>${esc(p.data||'—')}</td><td class="q">${p.cant}</td><td><button class="delp" title="Șterge produsul" data-code="${esc(code)}" data-cod="${esc(p.cod||'')}" data-produs="${esc(p.produs)}" data-cant="${esc(String(p.cant))}" data-data="${esc(p.data||'')}">✕</button></td></tr>`;
