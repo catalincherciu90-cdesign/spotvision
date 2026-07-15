@@ -287,8 +287,12 @@ export default {
       const setup = (await userCount(env)) === 0;
       return new Response(loginPage(setup), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
-    // autentificat -> serveste aplicatia din static assets
-    return env.ASSETS.fetch(req);
+    // autentificat -> serveste aplicatia din static assets, fara cache
+    // (ca modificarile sa apara imediat, nu din cache-ul browserului)
+    const assetRes = await env.ASSETS.fetch(req);
+    const h = new Headers(assetRes.headers);
+    h.set('Cache-Control', 'no-store, must-revalidate');
+    return new Response(assetRes.body, { status: assetRes.status, statusText: assetRes.statusText, headers: h });
   },
 };
 
