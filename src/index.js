@@ -7,6 +7,9 @@
 //  Baza de date: D1 (binding `DB`), schema in schema.sql.
 // ================================================================
 
+// HTML-ul aplicatiei, importat ca text (vezi [[rules]] Text din wrangler.toml).
+import APP_HTML from '../public/index.html';
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
@@ -287,12 +290,8 @@ export default {
       const setup = (await userCount(env)) === 0;
       return new Response(loginPage(setup), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
-    // autentificat -> serveste aplicatia din static assets, fara cache
-    // (ca modificarile sa apara imediat, nu din cache-ul browserului)
-    const assetRes = await env.ASSETS.fetch(req);
-    const h = new Headers(assetRes.headers);
-    h.set('Cache-Control', 'no-store, must-revalidate');
-    return new Response(assetRes.body, { status: assetRes.status, statusText: assetRes.statusText, headers: h });
+    // autentificat -> serveste aplicatia direct din bundle-ul Worker-ului, fara cache
+    return new Response(APP_HTML, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, must-revalidate' } });
   },
 };
 

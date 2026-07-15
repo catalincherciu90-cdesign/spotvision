@@ -2,15 +2,12 @@ name = "spotvision"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
-# HTML-ul (schema-raft.html) e servit ca static asset din ./public.
-# /  si  /index.html  ->  public/index.html
-# /api/*              ->  Worker (src/index.js)
-[assets]
-directory = "./public"
-binding = "ASSETS"
-# Worker-ul ruleaza primul pe fiecare cerere (gate de autentificare),
-# apoi serveste fisierele statice doar utilizatorilor logati.
-run_worker_first = true
+# HTML-ul aplicatiei e importat ca TEXT in Worker si servit direct (nu prin
+# static assets), fiindca upload-ul de assets ramanea blocat pe versiunea veche.
+# Astfel pagina se actualizeaza garantat la fiecare deploy (e in bundle-ul Worker-ului).
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
 
 [[d1_databases]]
 binding = "DB"
