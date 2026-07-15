@@ -94,6 +94,8 @@
   .invsearchbar input:focus{outline:none;border-color:var(--accent)}
   .delp{background:#fee2e2;color:#b91c1c;border:0;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:700;cursor:pointer}
   .delp:hover{background:#fecaca}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  body.readonly .delp,body.readonly .rmr,body.readonly .prm,body.readonly #addProd,body.readonly #addRack{display:none!important}
   /* ---------- MOBIL ---------- */
   @media(max-width:640px){
     header{padding:12px 12px 0}
@@ -162,18 +164,30 @@
 <div id="viewUsers" hidden>
 <div class="wrap">
   <div class="controls">
-    <div class="card">
+    <div class="card" id="addUserCard">
       <h2>Adaugă utilizator</h2>
       <p class="hint" style="margin-top:0;margin-bottom:12px">Fiecare coleg intră cu id-ul și parola lui. Conturile sunt partajate — toți lucrează pe aceleași date.</p>
       <div class="field"><label>Id (utilizator nou)</label><input id="newUid" placeholder="ex: ion"></div>
       <div class="field"><label>Parolă</label><input id="newPwd" type="password" placeholder="parolă"></div>
+      <div class="field"><label>Tip utilizator</label>
+        <select id="newRole">
+          <option value="operator" selected>Operator — editează inventarul/schema</option>
+          <option value="admin">Admin — face tot + gestionează utilizatori</option>
+          <option value="viewer">Vizualizare — doar citește</option>
+        </select></div>
       <button id="addUser" class="main">➕ Adaugă cont</button>
       <div id="usersErr" class="status" style="color:#dc2626"></div>
+    </div>
+    <div class="card" id="rolesInfo">
+      <h2>Tipuri de utilizatori</h2>
+      <p class="hint" style="margin-top:0"><b style="color:#7c3aed">Admin</b> — acces total: editează + adaugă/șterge utilizatori.<br>
+      <b style="color:#0ea5e9">Operator</b> — editează inventarul și schema, dar nu gestionează utilizatori.<br>
+      <b style="color:#64748b">Vizualizare</b> — doar vede schema și inventarul, nu poate modifica.</p>
     </div>
   </div>
   <div>
     <p class="total" style="margin-bottom:6px">Utilizatori</p>
-    <p class="sub">Toate conturile care pot intra în aplicație. „șterge" elimină contul (nu poți șterge ultimul cont).</p>
+    <p class="sub" id="usersHint">Toate conturile care pot intra în aplicație.</p>
     <div class="stage"><div id="usersList" style="display:flex;flex-direction:column;gap:8px"></div></div>
   </div>
 </div>
@@ -1161,9 +1175,9 @@ function restoreState(){ try{
 // --- rețea (activ doar când e servit de server) ---
 function api(method,p,body){ return fetch(p,{method,headers:{'Content-Type':'application/json'},body:body!==undefined?JSON.stringify(body):undefined}); }
 let cfgTimer;
-function pushConfig(){ if(!SERVER) return; clearTimeout(cfgTimer); cfgTimer=setTimeout(()=>{ api('PUT','/api/config',{racks:currentState().racks,g:globals()}).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); },600); }
-function pushLoc(code,arr){ if(!SERVER) return; api('PUT','/api/inventory/'+encodeURIComponent(code),arr||[]).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); }
-function pushAllInventory(){ if(!SERVER) return; api('PUT','/api/inventory',inventory).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); }
+function pushConfig(){ if(!SERVER||window.__readonly) return; clearTimeout(cfgTimer); cfgTimer=setTimeout(()=>{ api('PUT','/api/config',{racks:currentState().racks,g:globals()}).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); },600); }
+function pushLoc(code,arr){ if(!SERVER||window.__readonly) return; api('PUT','/api/inventory/'+encodeURIComponent(code),arr||[]).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); }
+function pushAllInventory(){ if(!SERVER||window.__readonly) return; api('PUT','/api/inventory',inventory).then(()=>setSyncBadge(true)).catch(()=>setSyncBadge(false)); }
 function setSyncBadge(ok){ const b=$('syncBadge'); if(!b) return;
   if(!SERVER){ b.className='badge local'; b.textContent='● Local (pe acest calculator)'; return; }
   b.className='badge '+(ok?'on':'off'); b.textContent=ok?'● Conectat la server (partajat cu colegii)':'● Server indisponibil'; }
@@ -1205,6 +1219,8 @@ function autoSyncFormat(){
 async function initApp(){
   if(SERVER){
     try{
+      // afla rolul devreme, ca push-urile sa respecte read-only (viewer) inainte de orice scriere
+      try{ const a=await (await fetch('/api/auth-status')).json(); window.__role=a&&a.role; window.__readonly=(a&&a.role==='viewer'); }catch(e){}
       const st=await (await fetch('/api/data')).json();
       const has=(st.racks&&st.racks.length)||Object.keys(st.inv||{}).length;
       if(has){ applyState(st); autoSyncFormat(); }
@@ -1233,12 +1249,25 @@ initApp();
   const $ = id => document.getElementById(id);
   const bar = $('authBar');
 
+  function applyRole(role){
+    window.__role=role; window.__isAdmin=(role==='admin'); window.__readonly=(role==='viewer');
+    if(role==='viewer'){
+      document.body.classList.add('readonly');
+      ['addRack','addProd','btnInv','btnInvClear','btnSyncSchema','btnReset','btnRackCfg','applyAll','btnLoad'].forEach(id=>{ const el=$(id); if(el) el.disabled=true; });
+      if(!$('roBanner')){ const b=document.createElement('div'); b.id='roBanner'; b.textContent='👁️ Cont de vizualizare — poți doar să vezi, nu să modifici.'; b.style.cssText='background:#fef9c3;color:#854d0e;font-size:13px;font-weight:600;padding:8px 14px;text-align:center'; const h=document.querySelector('header'); if(h&&h.parentNode) h.parentNode.insertBefore(b,h.nextSibling); }
+    }
+    const addCard=$('addUserCard'); if(addCard) addCard.style.display=(role==='admin')?'':'none';
+    const uh=$('usersHint'); if(uh&&role!=='admin') uh.textContent='Lista conturilor. Doar administratorii pot adăuga sau șterge utilizatori.';
+  }
   async function initAuth(){
     try{
       const st = await (await fetch('/api/auth-status')).json();
       if(st && st.authenticated){
-        $('authUser').textContent = st.id || '';
+        const role=st.role||'operator';
+        const lbl=role==='admin'?'Admin':(role==='viewer'?'Vizualizare':'Operator');
+        $('authUser').textContent = (st.id||'') + ' · ' + lbl;
         bar.style.display = 'flex';
+        applyRole(role);
       }
     }catch(e){}
   }
@@ -1259,25 +1288,31 @@ initApp();
     const list = $('usersList'); list.innerHTML = 'Se încarcă…';
     try{
       const d = await (await fetch('/api/users')).json();
-      const me = d.me;
+      const me = d.me, isAdmin = d.myRole==='admin';
+      const roleBadge=(r)=>{ const t=r==='admin'?'Admin':(r==='viewer'?'Vizualizare':'Operator');
+        const c=r==='admin'?'#7c3aed;background:#f3e8ff':(r==='viewer'?'#64748b;background:#f1f5f9':'#0369a1;background:#e0f2fe');
+        return '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;color:'+c+'">'+t+'</span>'; };
       list.innerHTML = '';
       (d.users||[]).forEach(u=>{
         const row = document.createElement('div');
-        row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px';
+        row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 11px;border:1px solid #e2e8f0;border-radius:8px';
         const label = u.id + (u.id===me ? ' (tu)' : '');
-        row.innerHTML = '<span>'+label.replace(/</g,'&lt;')+'</span>';
-        const del = document.createElement('a');
-        del.href='#'; del.textContent='șterge'; del.style.cssText='color:#dc2626;text-decoration:none;font-size:13px';
-        del.addEventListener('click', async ev=>{
-          ev.preventDefault();
-          if(!confirm('Ștergi contul „'+u.id+'”?')) return;
-          const r = await fetch('/api/users/'+encodeURIComponent(u.id),{method:'DELETE'});
-          const rd = await r.json().catch(()=>({}));
-          if(!r.ok){ $('usersErr').textContent = rd.error||'Eroare la ștergere.'; return; }
-          if(u.id===me){ location.href='/'; return; }
-          loadUsers();
-        });
-        row.appendChild(del); list.appendChild(row);
+        row.innerHTML = '<span style="display:flex;align-items:center;gap:8px"><b>'+label.replace(/</g,'&lt;')+'</b> '+roleBadge(u.role||'operator')+'</span>';
+        if(isAdmin){
+          const del = document.createElement('a');
+          del.href='#'; del.textContent='șterge'; del.style.cssText='color:#dc2626;text-decoration:none;font-size:13px;white-space:nowrap';
+          del.addEventListener('click', async ev=>{
+            ev.preventDefault();
+            if(!confirm('Ștergi contul „'+u.id+'”?')) return;
+            const r = await fetch('/api/users/'+encodeURIComponent(u.id),{method:'DELETE'});
+            const rd = await r.json().catch(()=>({}));
+            if(!r.ok){ $('usersErr').textContent = rd.error||'Eroare la ștergere.'; return; }
+            if(u.id===me){ location.href='/'; return; }
+            loadUsers();
+          });
+          row.appendChild(del);
+        }
+        list.appendChild(row);
       });
       if(!(d.users||[]).length) list.textContent='Niciun utilizator.';
     }catch(e){ list.textContent='Eroare la încărcare.'; }
@@ -1285,9 +1320,9 @@ initApp();
 
   $('addUser').addEventListener('click', async ()=>{
     const err = $('usersErr'); err.textContent='';
-    const id = $('newUid').value.trim(), password = $('newPwd').value;
+    const id = $('newUid').value.trim(), password = $('newPwd').value, role = ($('newRole')?$('newRole').value:'operator');
     if(!id || !password){ err.textContent='Completează id și parolă.'; return; }
-    const r = await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password})});
+    const r = await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password,role})});
     const d = await r.json().catch(()=>({}));
     if(!r.ok){ err.textContent = d.error||'Eroare.'; return; }
     $('newUid').value=''; $('newPwd').value=''; loadUsers();

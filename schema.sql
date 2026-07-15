@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS inventory (
 CREATE TABLE IF NOT EXISTS users (
   id         TEXT PRIMARY KEY,
   pass_hash  TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  role       TEXT NOT NULL DEFAULT 'operator'  -- 'admin' | 'operator' | 'viewer'
 );
 
 -- Config intern (ex: secretul de semnare a sesiunilor, auto-generat).
