@@ -69,7 +69,7 @@
   #locPanel td.q{text-align:right;font-weight:700}
   #locPanel .tot{font-weight:800}
   #locPanel .empty{color:var(--muted);margin-top:6px}
-  .prow{display:grid;grid-template-columns:1fr 66px 140px 34px;gap:8px;margin-bottom:8px}
+  .prow{display:grid;grid-template-columns:110px 1fr 66px 140px 34px;gap:8px;margin-bottom:8px}
   #fifoResult h3{margin:0 0 6px;font-size:16px}
   #fifoResult ol{margin:6px 0 0;padding-left:22px}
   #fifoResult li{margin:5px 0}
@@ -167,6 +167,11 @@
         <div class="field"><label>Cifre palet</label><input id="pdig" type="number" min="1" max="3" value="2"></div>
         <div class="field"><label>Separator</label><input id="sep" value="-"></div>
       </div>
+      <div class="field"><label>Ordine în cod</label>
+        <select id="codeorder">
+          <option value="lp" selected>Nivel, apoi palet (A01-N01-R01)</option>
+          <option value="pl">Palet, apoi nivel (A01-R01-N01)</option>
+        </select></div>
     </div>
     <div class="card">
       <h2>Afișare</h2>
@@ -306,7 +311,7 @@
     <div class="card">
       <h2>FIFO — ordine de scoatere</h2>
       <div class="field" style="margin:0"><label>Caută un produs</label>
-        <input id="fifoProd" list="prodList" placeholder="ex. Cutii carton" autocomplete="off">
+        <input id="fifoProd" list="prodList" placeholder="ex. Cutii carton sau cod SKU" autocomplete="off">
         <datalist id="prodList"></datalist>
       </div>
       <p class="hint" style="margin-top:8px">Îți arată din ce locație să scoți prima, după data intrării (cel mai vechi primul).</p>
@@ -319,7 +324,7 @@
   </div>
   <div>
     <div id="fifoResult" class="card noprint" style="display:none"></div>
-    <div class="invsearchbar noprint"><input id="invSearch" placeholder="🔎 Caută cod locație (ex. E04) — click pe cod te duce pe schemă"></div>
+    <div class="invsearchbar noprint"><input id="invSearch" placeholder="🔎 Caută locație, produs sau cod produs (ex. E04, Cutii, SKU-100) — click pe cod te duce pe schemă"></div>
     <p class="sub noprint">Toate produsele înregistrate — <span id="invSummary">0 locații, 0 produse</span>. <b>Click pe un cod = salt pe schemă.</b></p>
     <div class="stage"><div id="invTableWrap"></div></div>
   </div>
@@ -402,7 +407,13 @@ function rackById(id){ return readRacks().find(r=>r.id===id); }
 function globals(){
   return {ldig:+$('ldig').value||2,pdig:+$('pdig').value||2,sep:$('sep').value.trim()||'-',
     lpref:$('lpref').value,ppref:$('ppref').value,base:$('base').value,pdir:$('pdir').value,mode:$('cellmode').value,
-    cap:+$('capacity').value||0};
+    cap:+$('capacity').value||0, order:($('codeorder')?$('codeorder').value:'lp')||'lp'};
+}
+// Generează codul de locație respectând ordinea (nivel-palet sau palet-nivel).
+function locCode(name,L,P,g){
+  g=g||globals();
+  const lev=`${g.lpref}${pad(L,g.ldig)}`, pal=`${g.ppref}${pad(P,g.pdig)}`;
+  return (g.order==='pl') ? `${name}${g.sep}${pal}${g.sep}${lev}` : `${name}${g.sep}${lev}${g.sep}${pal}`;
 }
 
 // ---------- DIMENSIUNI per raft ----------
@@ -446,18 +457,18 @@ function loadInvRows(rows){
     const code=String(pick(o,['locatie','locație','locatia','location','cod locatie','cod locație'])||'').trim();
     if(!code) return;
     let produs=String(pick(o,['denumire produs','denumire','produs','product','articol','nume','material','descriere'])||'').trim();
-    if(!produs) produs=String(pick(o,['cod produs','cod','cod articol','sku'])||'').trim();
-    if(!produs) produs='(fără nume)';
+    const cod=String(pick(o,['cod produs','cod','cod articol','sku','cod material','cod sap','part number','pn'])||'').trim();
+    if(!produs) produs=cod||'(fără nume)';
     const cant=+(pick(o,['cantitate','cant','bucati','bucăți','buc','qty','stoc'])||0)||0;
     const data=toDateStr(pick(o,['data introducere bo','data creare palet','data','data intrare','data intrării','data intrarii','date','data receptie','data recepție']));
-    const key=code.toUpperCase(); (inventory[key]=inventory[key]||[]).push({produs,cant,data}); n++;
+    const key=code.toUpperCase(); (inventory[key]=inventory[key]||[]).push({produs,cod,cant,data}); n++;
   });
   return n;
 }
 function occupiedCount(){
   const g=globals(); let occ=0;
   for(const r of readRacks()) for(let L=1;L<=r.levels;L++) for(let j=1;j<=r.pallets;j++){
-    const code=`${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(j,g.pdig)}`;
+    const code=locCode(r.name,L,j,g);
     if(invByCode(code)) occ++;
   }
   return occ;
@@ -469,9 +480,9 @@ function showLoc(code){
   if(inv&&inv.length){
     const list=inv.slice().sort(byFifo);
     const total=list.reduce((a,x)=>a+(+x.cant||0),0);
-    h+=`<table><thead><tr><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>`;
-    list.forEach((x,i)=>h+=`<tr><td>${esc(x.produs)}${i===0&&x.data?'<span class="fifo-tag">scoate primul</span>':''}</td><td>${esc(x.data||'—')}</td><td class="q">${x.cant}</td><td><button class="delp" title="Șterge produsul" data-produs="${esc(x.produs)}" data-cant="${esc(String(x.cant))}" data-data="${esc(x.data||'')}">✕</button></td></tr>`);
-    h+=`<tr><td class="tot">Total</td><td></td><td class="q tot">${total}</td><td></td></tr></tbody></table>`;
+    h+=`<table><thead><tr><th>Cod</th><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>`;
+    list.forEach((x,i)=>h+=`<tr><td>${esc(x.cod||'—')}</td><td>${esc(x.produs)}${i===0&&x.data?'<span class="fifo-tag">scoate primul</span>':''}</td><td>${esc(x.data||'—')}</td><td class="q">${x.cant}</td><td><button class="delp" title="Șterge produsul" data-cod="${esc(x.cod||'')}" data-produs="${esc(x.produs)}" data-cant="${esc(String(x.cant))}" data-data="${esc(x.data||'')}">✕</button></td></tr>`);
+    h+=`<tr><td class="tot">Total</td><td></td><td></td><td class="q tot">${total}</td><td></td></tr></tbody></table>`;
   } else h+=`<p class="empty">Locație liberă — niciun produs.</p>`;
   p.innerHTML=h;
   refresh();
@@ -481,7 +492,7 @@ $('locPanel').addEventListener('click', e=>{
   if(e.target.classList.contains('close')){ $('locPanel').style.display='none'; selectedCode=''; refresh(); return; }
   if(e.target.classList.contains('delp')){
     const b=e.target, code=(selectedCode||'').toUpperCase(), arr=inventory[code]||[];
-    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
+    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cod||'')===(b.dataset.cod||'') && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
     if(i>=0){ arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); showLoc(code); }
   }
 });
@@ -505,8 +516,8 @@ $('fileInv').addEventListener('change',e=>{ if(e.target.files[0]) readInvFile(e.
 $('btnInvClear').addEventListener('click',()=>{ for(const k in inventory) delete inventory[k]; selectedCode=''; $('locPanel').style.display='none'; pushAllInventory(); refresh(); $('invStatus').textContent='Inventar șters.'; });
 $('btnInvModel').addEventListener('click',()=>{
   const g=globals(), r=readRacks()[0];
-  const c=(L,j)=>`${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(j,g.pdig)}`;
-  const ex=[['Locatie','Produs','Cantitate','Data'],[c(1,1),'Cutii carton 40x30',120,'2026-05-10'],[c(1,1),'Folie stretch',15,'2026-06-02'],[c(1,2),'Paleti EUR',30,'2026-04-21']];
+  const c=(L,j)=>locCode(r.name,L,j,g);
+  const ex=[['Locatie','Cod produs','Produs','Cantitate','Data'],[c(1,1),'SKU-1001','Cutii carton 40x30',120,'2026-05-10'],[c(1,1),'SKU-2002','Folie stretch',15,'2026-06-02'],[c(1,2),'SKU-3003','Paleti EUR',30,'2026-04-21']];
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ex),'Inventar');
   XLSX.writeFile(wb,'model_inventar.xlsx');
 });
@@ -514,12 +525,20 @@ $('btnInvModel').addEventListener('click',()=>{
 function detectSep(code){ for(const s of ['-','/','.','_',' ']){ if(String(code).split(s).length>=3) return s; } return '-'; }
 // Parsează un cod de locație în {name, L, P, sep, lpref, ppref, ldig, pdig}
 // Extrage NUMĂRUL din orice token (N01→1, R04→4, 27→27), deci merge pe orice format.
-function parseLoc(code){
+function parseLoc(code,g){
+  g=g||(typeof globals==='function'?globals():{});
   const s=String(code||'').trim().toUpperCase(); if(!s) return null;
   const sep=detectSep(s), parts=s.split(sep);
   if(parts.length<3) return null;
-  const lvTok=parts[parts.length-2], plTok=parts[parts.length-1];
+  const t2=parts[parts.length-2], t1=parts[parts.length-1];
   const name=parts.slice(0,parts.length-2).join(sep);
+  const lpU=(g.lpref||'').toUpperCase(), ppU=(g.ppref||'').toUpperCase();
+  let lvTok, plTok;
+  // identifică nivelul/paletul după prefix (independent de ordine); altfel după ordinea setată
+  if(lpU&&ppU&&t2.startsWith(lpU)&&t1.startsWith(ppU)){ lvTok=t2; plTok=t1; }
+  else if(lpU&&ppU&&t1.startsWith(lpU)&&t2.startsWith(ppU)){ lvTok=t1; plTok=t2; }
+  else if((g.order||'lp')==='pl'){ plTok=t2; lvTok=t1; }
+  else { lvTok=t2; plTok=t1; }
   const lm=lvTok.match(/\d+/), pm=plTok.match(/\d+/);
   if(!name||!lm||!pm) return null;
   const L=parseInt(lm[0],10), P=parseInt(pm[0],10);
@@ -558,7 +577,7 @@ function applySchemaFromInventory(){
   // normalizează cheile inventarului la formatul canonic al schemei
   const g=globals(), fresh={};
   Object.keys(inventory).forEach(code=>{ const info=parsedMap[code];
-    const key=info ? `${info.name}${g.sep}${g.lpref}${pad(info.L,g.ldig)}${g.sep}${g.ppref}${pad(info.P,g.pdig)}` : code.toUpperCase();
+    const key=info ? locCode(info.name,info.L,info.P,g) : code.toUpperCase();
     (fresh[key]=fresh[key]||[]).push(...inventory[code]);
   });
   for(const k in inventory) delete inventory[k];
@@ -582,7 +601,7 @@ $('btnSyncSchema').addEventListener('click', syncSchemaFromInventory);
 function invCurrentCode(){
   const r=rackById($('invRack').value)||readRacks()[0]; const g=globals();
   const L=+$('invLevel').value||1, P=+$('invPallet').value||1;
-  return `${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(P,g.pdig)}`;
+  return locCode(r.name,L,P,g);
 }
 function syncInvSelectors(){
   const rs=$('invRack'), prev=rs.value, racks=readRacks();
@@ -592,7 +611,7 @@ function syncInvSelectors(){
   const ls=$('invLevel'), plv=ls.value; ls.innerHTML=Array.from({length:r.levels},(_,i)=>`<option>${i+1}</option>`).join(''); if(+plv>=1&&+plv<=r.levels) ls.value=plv;
   const ps=$('invPallet'), ppv=ps.value; ps.innerHTML=Array.from({length:r.pallets},(_,i)=>`<option>${i+1}</option>`).join(''); if(+ppv>=1&&+ppv<=r.pallets) ps.value=ppv;
 }
-function prowHtml(p){ return `<div class="prow"><input class="p-name" placeholder="Produs" value="${esc(p.produs||'')}"><input class="p-qty" type="number" min="0" placeholder="Cant." value="${p.cant===''||p.cant===undefined?'':p.cant}"><input class="p-date" type="date" title="Data intrării" value="${esc(p.data||'')}"><button class="prm" type="button" title="Șterge">✕</button></div>`; }
+function prowHtml(p){ return `<div class="prow"><input class="p-cod" placeholder="Cod" title="Cod produs / SKU" value="${esc(p.cod||'')}"><input class="p-name" placeholder="Produs" value="${esc(p.produs||'')}"><input class="p-qty" type="number" min="0" placeholder="Cant." value="${p.cant===''||p.cant===undefined?'':p.cant}"><input class="p-date" type="date" title="Data intrării" value="${esc(p.data||'')}"><button class="prm" type="button" title="Șterge">✕</button></div>`; }
 function renderProdEditor(){
   const code=invCurrentCode(); $('invCode').textContent=code;
   const list=inventory[code.toUpperCase()]||[];
@@ -603,8 +622,9 @@ function collectProds(){
   const code=invCurrentCode().toUpperCase(), arr=[];
   $('prodRows').querySelectorAll('.prow').forEach(r=>{
     const produs=r.querySelector('.p-name').value.trim(); const cant=+r.querySelector('.p-qty').value||0;
+    const cod=r.querySelector('.p-cod').value.trim();
     const data=r.querySelector('.p-date').value;
-    if(produs) arr.push({produs,cant,data});
+    if(produs||cod) arr.push({produs:produs||cod,cod,cant,data});
   });
   if(arr.length) inventory[code]=arr; else delete inventory[code];
   pushLoc(code, arr); saveState(); renderInvTable();
@@ -613,40 +633,41 @@ let invCodeQuery='';
 function renderInvTable(){
   const all=Object.keys(inventory).filter(k=>inventory[k]&&inventory[k].length).sort();
   const q=invCodeQuery.toUpperCase();
-  const codes=q?all.filter(k=>k.includes(q)):all;
+  const matchLoc=k=> k.includes(q) || (inventory[k]||[]).some(p=>(p.produs||'').toUpperCase().includes(q)||(p.cod||'').toUpperCase().includes(q));
+  const codes=q?all.filter(matchLoc):all;
   let items=0; all.forEach(k=>items+=inventory[k].length);
   $('invSummary').textContent=q?`${codes.length} din ${all.length} locații (filtru: ${esc(invCodeQuery)})`:`${all.length} locații, ${items} produse`;
   updateProductList();
-  if(!codes.length){ $('invTableWrap').innerHTML='<div class="empty">'+(q?'Nicio locație cu acest cod.':'Niciun produs încă. Alege o locație și adaugă produse.')+'</div>'; return; }
-  let h='<table><thead><tr><th>Locație</th><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>';
+  if(!codes.length){ $('invTableWrap').innerHTML='<div class="empty">'+(q?'Nimic găsit pentru „'+esc(invCodeQuery)+'" (locație, produs sau cod).':'Niciun produs încă. Alege o locație și adaugă produse.')+'</div>'; return; }
+  let h='<table><thead><tr><th>Locație</th><th>Cod</th><th>Produs</th><th>Data intrare</th><th style="text-align:right">Cant.</th><th></th></tr></thead><tbody>';
   codes.forEach(code=>{ inventory[code].slice().sort(byFifo).forEach((p,i)=>{
-    h+=`<tr class="${i===0?'loc':''}"><td>${i===0?`<span class="code" data-code="${esc(code)}">${esc(code)}</span>`:''}</td><td>${esc(p.produs)}</td><td>${esc(p.data||'—')}</td><td class="q">${p.cant}</td><td><button class="delp" title="Șterge produsul" data-code="${esc(code)}" data-produs="${esc(p.produs)}" data-cant="${esc(String(p.cant))}" data-data="${esc(p.data||'')}">✕</button></td></tr>`;
+    h+=`<tr class="${i===0?'loc':''}"><td>${i===0?`<span class="code" data-code="${esc(code)}">${esc(code)}</span>`:''}</td><td>${esc(p.cod||'—')}</td><td>${esc(p.produs)}</td><td>${esc(p.data||'—')}</td><td class="q">${p.cant}</td><td><button class="delp" title="Șterge produsul" data-code="${esc(code)}" data-cod="${esc(p.cod||'')}" data-produs="${esc(p.produs)}" data-cant="${esc(String(p.cant))}" data-data="${esc(p.data||'')}">✕</button></td></tr>`;
   }); });
   $('invTableWrap').innerHTML=h+'</tbody></table>';
 }
 function updateProductList(){
   const set=new Set();
-  Object.values(inventory).forEach(arr=>arr.forEach(p=>{ if(p.produs) set.add(p.produs); }));
+  Object.values(inventory).forEach(arr=>arr.forEach(p=>{ if(p.produs) set.add(p.produs); if(p.cod) set.add(p.cod); }));
   const dl=$('prodList'); if(dl) dl.innerHTML=[...set].sort().map(n=>`<option value="${esc(n)}">`).join('');
 }
 function renderFifo(query){
   const q=(query||'').trim().toLowerCase(); const box=$('fifoResult');
   if(!q){ box.style.display='none'; box.innerHTML=''; return; }
   const hits=[];
-  Object.keys(inventory).forEach(code=>inventory[code].forEach(p=>{ if((p.produs||'').toLowerCase().includes(q)) hits.push({code,produs:p.produs,cant:p.cant,data:p.data}); }));
+  Object.keys(inventory).forEach(code=>inventory[code].forEach(p=>{ if((p.produs||'').toLowerCase().includes(q)||(p.cod||'').toLowerCase().includes(q)) hits.push({code,produs:p.produs,cod:p.cod,cant:p.cant,data:p.data}); }));
   hits.sort(byFifo);
   box.style.display='block';
-  if(!hits.length){ box.innerHTML=`<h3>FIFO: „${esc(query)}"</h3><p class="empty">Nu am găsit produsul în nicio locație.</p>`; return; }
+  if(!hits.length){ box.innerHTML=`<h3>FIFO: „${esc(query)}"</h3><p class="empty">Nu am găsit produsul (nici după nume, nici după cod).</p>`; return; }
   const total=hits.reduce((a,x)=>a+(+x.cant||0),0);
   let h=`<h3>Ordine de scoatere (FIFO)</h3><p class="sub">„${esc(query)}" — ${hits.length} loturi, total ${total} buc. Scoate de sus în jos.</p><ol>`;
-  hits.forEach((x,i)=>{ h+=`<li class="${i===0?'first':''}"><span class="code" data-code="${esc(x.code)}">${esc(x.code)}</span> — ${esc(x.produs)} · ${x.cant} buc · intrat: ${esc(x.data||'fără dată')}${i===0?' <span class="fifo-tag">scoate primul</span>':''}</li>`; });
+  hits.forEach((x,i)=>{ h+=`<li class="${i===0?'first':''}"><span class="code" data-code="${esc(x.code)}">${esc(x.code)}</span> — ${x.cod?'<b>'+esc(x.cod)+'</b> · ':''}${esc(x.produs)} · ${x.cant} buc · intrat: ${esc(x.data||'fără dată')}${i===0?' <span class="fifo-tag">scoate primul</span>':''}</li>`; });
   box.innerHTML=h+'</ol>';
 }
 $('fifoProd').addEventListener('input', e=>renderFifo(e.target.value));
 function selectLoc(code){
   const g=globals();
   for(const r of readRacks()) for(let L=1;L<=r.levels;L++) for(let P=1;P<=r.pallets;P++){
-    const c=`${r.name}${g.sep}${g.lpref}${pad(L,g.ldig)}${g.sep}${g.ppref}${pad(P,g.pdig)}`;
+    const c=locCode(r.name,L,P,g);
     if(c.toUpperCase()===code.toUpperCase()){ $('invRack').value=r.id; syncInvSelectors(); $('invLevel').value=L; $('invPallet').value=P; renderProdEditor(); return; }
   }
 }
@@ -670,7 +691,7 @@ $('prodRows').addEventListener('click', e=>{ if(e.target.classList.contains('prm
 $('invTableWrap').addEventListener('click', e=>{
   if(e.target.classList.contains('delp')){
     const b=e.target, code=b.dataset.code.toUpperCase(), arr=inventory[code]||[];
-    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
+    const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cod||'')===(b.dataset.cod||'') && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
     if(i>=0){ arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); renderInvTable(); }
     return;
   }
@@ -679,8 +700,8 @@ $('invTableWrap').addEventListener('click', e=>{
 $('fifoResult').addEventListener('click', e=>{ const c=e.target.closest('.code'); if(c) goToSchema(c.getAttribute('data-code')); });
 $('invSearch').addEventListener('input', e=>{ invCodeQuery=e.target.value.trim(); renderInvTable(); });
 $('invExport').addEventListener('click',()=>{ try{
-  const wb=XLSX.utils.book_new(), rows=[['Locatie','Produs','Cantitate','Data']];
-  Object.keys(inventory).sort().forEach(k=>inventory[k].slice().sort(byFifo).forEach(p=>rows.push([k,p.produs,p.cant,p.data||''])));
+  const wb=XLSX.utils.book_new(), rows=[['Locatie','Cod produs','Produs','Cantitate','Data']];
+  Object.keys(inventory).sort().forEach(k=>inventory[k].slice().sort(byFifo).forEach(p=>rows.push([k,p.cod||'',p.produs,p.cant,p.data||''])));
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Inventar');
   XLSX.writeFile(wb,'inventar.xlsx'); $('invExpStatus').textContent='Exportat: inventar.xlsx';
 }catch(e){ $('invExpStatus').textContent='Eroare.'; } });
@@ -712,7 +733,7 @@ function buildSVG(r,g){
   for(let L=1;L<=r.levels;L++){const rowTop=g.base==='bottom'?(r.levels-L):(L-1);const y=gy+rowTop*cellH;
     s+=`<text x="${padd+labelW-10}" y="${y+cellH/2+levF*0.35}" text-anchor="end" font-size="${levF}" font-weight="800" fill="#111827">${esc(lev(L))}</text>`;
     for(let j=1;j<=r.pallets;j++){const palNo=g.pdir==='ltr'?j:(r.pallets-j+1);const x=gx+(j-1)*cellW;
-      const code=`${r.name}${g.sep}${lev(L)}${g.sep}${pal(palNo)}`;
+      const code=locCode(r.name,L,palNo,g);
       const inv=invByCode(code), occ=inv&&inv.length;
       const total=occ?inv.reduce((a,p)=>a+(+p.cant||0),0):0;
       const sel=(code.toUpperCase()===selectedCode);
@@ -869,7 +890,19 @@ function refresh(){
   if(!$('viewTech').hidden) $('techDraw').innerHTML=buildTech(techConfig($('techRack').value)).svg;
   if(typeof saveState==='function') saveState();
 }
-document.addEventListener('input', e=>{ if(e.target.closest('#dimInputs')||e.target.closest('#prodRows')||e.target.closest('#zoombar')||e.target.id==='fifoProd'||e.target.id==='invSearch') return; refresh(); });
+document.addEventListener('input', e=>{ if(e.target.closest('#dimInputs')||e.target.closest('#prodRows')||e.target.closest('#zoombar')||e.target.id==='fifoProd'||e.target.id==='invSearch'||e.target.id==='codeorder') return; refresh(); });
+// La schimbarea ordinii în cod, re-cheiază inventarul existent la noul format (după prefix, deci nu se pierd potriviri).
+function rekeyInventory(){
+  const g=globals(), fresh={};
+  Object.keys(inventory).forEach(code=>{ const info=parseLoc(code,g);
+    const key=info?locCode(info.name,info.L,info.P,g):code;
+    (fresh[key]=fresh[key]||[]).push(...inventory[code]);
+  });
+  for(const k in inventory) delete inventory[k];
+  Object.keys(fresh).forEach(k=>inventory[k]=fresh[k]);
+  refresh(); pushAllInventory();
+}
+$('codeorder').addEventListener('change', rekeyInventory);
 
 // ---------- export ----------
 function svgToCanvas(svg,W,H,scale){
@@ -923,10 +956,10 @@ function exportExcel(){
     const dh=['Raft','Wb','Uw','D','Bh','h0','hp','topClear','palletL','palletW','Pf','Pd','goodsH','load'];
     const dm=[dh]; racks.forEach(r=>{const d=getDims(r.id);dm.push([r.name,d.Wb,d.Uw,d.D,d.Bh,d.h0,d.hp,d.topClear,d.palletL,d.palletW,d.Pf,d.Pd,d.goodsH,d.load]);});
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(dm),'Dimensiuni');
-    const g=globals(), st=[['Cheie','Valoare'],['lpref',g.lpref],['ppref',g.ppref],['ldig',g.ldig],['pdig',g.pdig],['sep',g.sep],['base',g.base],['pdir',g.pdir],['mode',g.mode],['cap',g.cap]];
+    const g=globals(), st=[['Cheie','Valoare'],['lpref',g.lpref],['ppref',g.ppref],['ldig',g.ldig],['pdig',g.pdig],['sep',g.sep],['base',g.base],['pdir',g.pdir],['mode',g.mode],['cap',g.cap],['order',g.order]];
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(st),'Setari');
-    const invRows=[['Locatie','Produs','Cantitate','Data']];
-    for(const k in inventory) inventory[k].forEach(x=>invRows.push([k,x.produs,x.cant,x.data||'']));
+    const invRows=[['Locatie','Cod produs','Produs','Cantitate','Data']];
+    for(const k in inventory) inventory[k].forEach(x=>invRows.push([k,x.cod||'',x.produs,x.cant,x.data||'']));
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(invRows),'Inventar');
     XLSX.writeFile(wb,'config_rafturi.xlsx');
     $('ioStatus').textContent='Salvat: config_rafturi.xlsx';
@@ -945,7 +978,7 @@ function importExcel(file){
       if(sSheet){ const map={}; XLSX.utils.sheet_to_json(sSheet).forEach(o=>map[o.Cheie]=o.Valoare);
         const set=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
         set('lpref',map.lpref);set('ppref',map.ppref);set('ldig',map.ldig);set('pdig',map.pdig);
-        set('sep',map.sep);set('base',map.base);set('pdir',map.pdir);set('cellmode',map.mode);set('capacity',map.cap);
+        set('sep',map.sep);set('base',map.base);set('pdir',map.pdir);set('cellmode',map.mode);set('capacity',map.cap);set('codeorder',map.order);
       }
       $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
       const list=rows.length?rows:[['A01',4,3]];
@@ -1021,7 +1054,7 @@ function currentState(){ return { racks:readRacks().map(r=>({name:r.name,levels:
 function applyState(st){
   const g=st.g||{}, setv=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
   setv('lpref',g.lpref);setv('ppref',g.ppref);setv('ldig',g.ldig);setv('pdig',g.pdig);
-  setv('sep',g.sep);setv('base',g.base);setv('pdir',g.pdir);setv('cellmode',g.mode);setv('capacity',g.cap);
+  setv('sep',g.sep);setv('base',g.base);setv('pdir',g.pdir);setv('cellmode',g.mode);setv('capacity',g.cap);setv('codeorder',g.order);
   $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
   const racks=(st.racks&&st.racks.length)?st.racks:[{name:'A01',levels:4,pallets:3},{name:'A02',levels:4,pallets:3}];
   racks.forEach(r=>{ const id=addRackRaw(r.name,r.levels,r.pallets); if(r.dims) dimStore[id]={...DEF,...r.dims}; });
