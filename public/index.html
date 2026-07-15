@@ -22,6 +22,8 @@
   /* permite copiilor grilei sa se micsoreze sub latimea continutului (altfel un SVG/tabel lat lateste pagina) */
   .wrap>*{min-width:0}
   @media(max-width:860px){.wrap{grid-template-columns:1fr}}
+  /* cand layout-ul e stivuit (sub 860px), la Schita tehnica: desenul sus, meniul dedesubt */
+  @media(max-width:860px){#viewTech .wrap>.controls{order:2}}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:20px}
   .card h2{margin:0 0 14px;font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
   .field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
@@ -108,8 +110,6 @@
     /* bara cont: in flux normal, nu absoluta (nu se mai suprapune peste titlu) */
     #authBar{position:static!important;justify-content:flex-end;margin:2px 0 8px}
     .wrap{padding:12px;gap:14px}
-    /* pe mobil, la Schita tehnica: desenul sus, meniul (controalele) dedesubt */
-    #viewTech .wrap>.controls{order:2}
     .card{padding:14px;margin-bottom:14px}
     .stage{padding:12px}
     #viewSchema .stage{max-height:70vh}
