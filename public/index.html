@@ -19,6 +19,8 @@
   .badge.off{background:#fee2e2;color:#b91c1c}
   .badge.local{background:#e5e7eb;color:#374151}
   .wrap{max-width:none;margin:0;padding:24px;display:grid;grid-template-columns:330px 1fr;gap:24px}
+  /* permite copiilor grilei sa se micsoreze sub latimea continutului (altfel un SVG/tabel lat lateste pagina) */
+  .wrap>*{min-width:0}
   @media(max-width:860px){.wrap{grid-template-columns:1fr}}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:20px}
   .card h2{margin:0 0 14px;font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
@@ -92,6 +94,39 @@
   .invsearchbar input:focus{outline:none;border-color:var(--accent)}
   .delp{background:#fee2e2;color:#b91c1c;border:0;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:700;cursor:pointer}
   .delp:hover{background:#fecaca}
+  /* ---------- MOBIL ---------- */
+  @media(max-width:640px){
+    header{padding:12px 12px 0}
+    header h1{font-size:17px;line-height:1.3}
+    header p{font-size:13px;margin:4px 0 10px}
+    .tab{padding:9px 12px;font-size:14px}
+    /* bara cont: in flux normal, nu absoluta (nu se mai suprapune peste titlu) */
+    #authBar{position:static!important;justify-content:flex-end;margin:2px 0 8px}
+    .wrap{padding:12px;gap:14px}
+    .card{padding:14px;margin-bottom:14px}
+    .stage{padding:12px}
+    #viewSchema .stage{max-height:70vh}
+    /* inputuri 16px = fara zoom automat pe iaptop/iPhone la focus */
+    .field input,.field select,.prow input,.invsearchbar input,.rackfilter select{font-size:16px}
+    /* editor produs: nume pe tot randul, restul se aseaza pe randuri */
+    .prow{display:flex;flex-wrap:wrap;gap:8px}
+    .prow input{flex:1 1 40%;min-width:92px}
+    .prow .p-name{flex:1 1 100%}
+    .prow .prm{flex:1 1 100%;padding:9px}
+    /* filtre / zoom pe toata latimea */
+    .rackfilter{flex-wrap:wrap}
+    .rackfilter select{min-width:0;flex:1;width:100%}
+    .zoombar input[type=range]{max-width:none}
+    .zoombar #zVal{width:auto}
+    .legend{flex-wrap:wrap;gap:8px 14px}
+    .legend .tip{margin-left:0;flex-basis:100%}
+    .total{font-size:20px}
+    /* tabele: text mai mic; scroll orizontal ramane in .stage */
+    #invTableWrap table,#locPanel table{font-size:13px}
+    #invTableWrap th,#invTableWrap td{padding:6px 7px;white-space:nowrap}
+    #racks{max-height:50vh}
+  }
+  @media(max-width:640px){ body{overflow-x:hidden} }
   @media print{
     body{background:#fff}
     header,.controls{display:none!important}
@@ -1075,7 +1110,7 @@ function applyZoom(){
 function fitZoom(){
   const stage=document.querySelector('#viewSchema .stage'), svgs=[...document.querySelectorAll('#schema svg')];
   if(!svgs.length||!stage) return; let maxW=0; svgs.forEach(s=>{const vb=s.viewBox.baseVal; if(vb) maxW=Math.max(maxW,vb.width);});
-  if(maxW>0){ schemaZoom=Math.max(0.2,Math.min(2,(stage.clientWidth-40)/maxW)); applyZoom(); }
+  if(maxW>0){ schemaZoom=Math.max(0.05,Math.min(2,(stage.clientWidth-40)/maxW)); applyZoom(); }
 }
 $('zoom').addEventListener('input',()=>{ schemaZoom=+$('zoom').value/100; applyZoom(); });
 $('zIn').addEventListener('click',()=>{ schemaZoom=Math.min(2,schemaZoom+0.1); applyZoom(); });
