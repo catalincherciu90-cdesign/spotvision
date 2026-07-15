@@ -198,14 +198,18 @@
 <div class="wrap">
   <div class="controls">
     <div class="card">
-      <h2>Rafturi</h2>
-      <p class="hint" style="margin-top:0;margin-bottom:12px">Un rând pentru fiecare raft. Nume, câte niveluri și câți paleți pe nivel.</p>
-      <div id="racks"></div>
-      <button class="addr" id="addRack">➕ Adaugă raft</button>
-      <button class="main ghost" id="btnRackCfg" style="margin-top:12px">📂 Încarcă config rafturi (Excel)</button>
-      <button class="main ghost" id="btnRackCfgModel" style="margin-top:6px">Descarcă model config</button>
-      <input type="file" id="fileRackCfg" accept=".xlsx,.xls" hidden>
-      <p class="hint" id="rackCfgStatus" style="margin-top:6px">Excel cu o coloană pentru numele raftului + coloanele <b>Nivele</b> și <b>Rand</b>.</p>
+      <h2 id="rackToggle" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;margin-bottom:0;user-select:none">
+        <span>Rafturi <span id="rackCount" style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8">—</span></span>
+        <span id="rackChevron" style="font-size:14px">▸</span></h2>
+      <div id="rackBody" hidden style="margin-top:14px">
+        <p class="hint" style="margin-top:0;margin-bottom:12px">Un rând pentru fiecare raft. Nume, câte niveluri și câți paleți pe nivel.</p>
+        <div id="racks"></div>
+        <button class="addr" id="addRack">➕ Adaugă raft</button>
+        <button class="main ghost" id="btnRackCfg" style="margin-top:12px">📂 Încarcă config rafturi (Excel)</button>
+        <button class="main ghost" id="btnRackCfgModel" style="margin-top:6px">Descarcă model config</button>
+        <input type="file" id="fileRackCfg" accept=".xlsx,.xls" hidden>
+        <p class="hint" id="rackCfgStatus" style="margin-top:6px">Excel cu o coloană pentru numele raftului + coloanele <b>Nivele</b> și <b>Rand</b>.</p>
+      </div>
     </div>
     <div class="card">
       <h2>Format cod (comun)</h2>
@@ -442,6 +446,7 @@ function rackTemplate(id,name,lev,pal){
 function addRackRaw(name,lev,pal){ const id=++idc; $('racks').insertAdjacentHTML('beforeend', rackTemplate(id,name,lev,pal)); return id; }
 function addRack(name='A01',lev=4,pal=3){ addRackRaw(name,lev,pal); refresh(); }
 $('addRack').addEventListener('click', ()=>addRack('RAFT',4,3));
+$('rackToggle').addEventListener('click', ()=>{ const b=$('rackBody'); b.hidden=!b.hidden; $('rackChevron').textContent=b.hidden?'▸':'▾'; });
 $('racks').addEventListener('click', e=>{
   if(e.target.classList.contains('rmr')){
     if($('racks').querySelectorAll('.rack').length>1){ const id=e.target.closest('.rack').dataset.id; delete dimStore[id]; e.target.closest('.rack').remove(); }
@@ -968,6 +973,7 @@ function refresh(){
   let tot=0;
   for(const r of racks){const c=r.levels*r.pallets;tot+=c;r.el.querySelector('.cnt').textContent=`${c} poziții`;}
   $('tot').textContent=tot.toLocaleString('ro-RO'); $('nr').textContent=racks.length;
+  { const rc=$('rackCount'); if(rc) rc.textContent='('+racks.length+' '+(racks.length===1?'raft':'rafturi')+')'; }
   $('occ').textContent=Object.keys(inventory).length?occupiedCount().toLocaleString('ro-RO'):'0';
   syncSchemaFilter();
   $('schema').innerHTML=schemaHTML(); applyZoom();
