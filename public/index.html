@@ -11,9 +11,11 @@
   header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 24px 0}
   header h1{margin:0;font-size:20px}
   header p{margin:4px 0 12px;color:var(--muted);font-size:14px}
-  .tabs{display:flex;gap:4px;flex-wrap:wrap}
-  .tab{background:none;border:0;border-bottom:3px solid transparent;padding:10px 16px;font-size:15px;font-weight:600;color:var(--muted);cursor:pointer}
-  .tab.active{color:var(--accent-d);border-bottom-color:var(--accent)}
+  .tabs{display:inline-flex;gap:5px;flex-wrap:wrap;background:#eef1f6;padding:5px;border-radius:13px;margin-bottom:2px}
+  .tab{background:none;border:0;border-radius:9px;padding:9px 16px;font-size:14.5px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;transition:background .15s,color .15s,box-shadow .15s}
+  .tab:hover{background:#fff;color:var(--ink)}
+  .tab.active{background:var(--accent);color:#fff;box-shadow:0 2px 7px rgba(37,99,235,.35)}
+  .tab.active:hover{background:var(--accent-d);color:#fff}
   .badge{display:inline-block;margin:8px 0 12px;font-size:12px;font-weight:600;padding:3px 11px;border-radius:20px}
   .badge.on{background:#dcfce7;color:#15803d}
   .badge.off{background:#fee2e2;color:#b91c1c}
