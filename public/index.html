@@ -228,7 +228,7 @@
 </head>
 <body>
 <header>
-  <div style="display:flex;align-items:center;gap:14px"><img id="appLogo" alt="logo" style="display:none;max-height:322px;max-width:min(90vw,1260px);width:auto;border-radius:6px"><h1 style="margin:0">Warehouse Organizer</h1></div>
+  <div style="display:flex;align-items:center;gap:14px"><img id="appLogo" alt="logo" style="display:none;max-height:322px;max-width:min(90vw,1260px);width:auto;border-radius:6px"><h1 id="appTitle" style="margin:0">Warehouse Organizer</h1></div>
   <p>Depozitul tău, organizat inteligent. 📦 Găsești orice produs în câteva secunde, scanezi cu telefonul și culegi comenzile fără bătăi de cap — totul într-un singur loc.</p>
   <div class="tabs">
     <button class="tab active" data-v="schema">Schemă locații</button>
@@ -2966,9 +2966,9 @@ function globals(){
 // --- logo aplicatie (salvat in config, partajat) ---
 let logoData='';
 function applyLogo(){
-  const img=$('appLogo'), pv=$('logoPreview'), hint=$('logoHint'), rm=$('btnLogoRemove');
-  if(logoData){ if(img){img.src=logoData;img.style.display='';} if(pv){pv.src=logoData;pv.style.display='';} if(hint) hint.style.display='none'; if(rm) rm.style.display=''; }
-  else { if(img){img.style.display='none';img.removeAttribute('src');} if(pv){pv.style.display='none';pv.removeAttribute('src');} if(hint) hint.style.display=''; if(rm) rm.style.display='none'; }
+  const img=$('appLogo'), pv=$('logoPreview'), hint=$('logoHint'), rm=$('btnLogoRemove'), ttl=$('appTitle');
+  if(logoData){ if(img){img.src=logoData;img.style.display='';} if(pv){pv.src=logoData;pv.style.display='';} if(hint) hint.style.display='none'; if(rm) rm.style.display=''; if(ttl) ttl.style.display='none'; }
+  else { if(img){img.style.display='none';img.removeAttribute('src');} if(pv){pv.style.display='none';pv.removeAttribute('src');} if(hint) hint.style.display=''; if(rm) rm.style.display='none'; if(ttl) ttl.style.display=''; }
 }
 function setLogo(data){ logoData=data||''; applyLogo(); if(typeof saveState==='function') saveState(); }
 // redimensioneaza imaginea la max 240px si o salveaza ca data URL (PNG)
