@@ -2970,6 +2970,19 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   if(v==='log') renderLog();
 }));
 
+// ---------- Permisiuni pe taburi ----------
+const TAB_DEFS=[['schema','Schemă locații'],['inv','Inventar'],['pick','Picking'],['dim','Dimensiuni raft'],['tech','Schiță tehnică'],['labels','Etichete'],['users','Utilizatori'],['log','Activitate']];
+function applyTabs(allowed, role){
+  window.__tabs=allowed||null;
+  const all = (role==='admin') || !allowed;   // admin sau NULL => toate taburile
+  const okTab=k=>all||allowed.includes(k);
+  document.querySelectorAll('.tabs .tab').forEach(b=>{ b.style.display = okTab(b.dataset.v)?'':'none'; });
+  // linkul „Utilizatori” din colțul dreapta-sus urmează aceeași permisiune
+  { const bu=document.getElementById('btnUsers'); if(bu) bu.style.display = okTab('users')?'':'none'; }
+  const active=document.querySelector('.tab.active');
+  if(active && active.style.display==='none'){ const first=[...document.querySelectorAll('.tabs .tab')].find(b=>b.style.display!=='none'); if(first) first.click(); }
+}
+
 // ---------- RAFTURI (cu id stabil) ----------
 let idc=0;
 function rackTemplate(id,name,lev,pal){
@@ -4311,7 +4324,7 @@ async function initApp(){
   if(SERVER){
     try{
       // afla rolul devreme, ca push-urile sa respecte read-only (viewer) inainte de orice scriere
-      try{ const a=await (await fetch('/api/auth-status')).json(); window.__role=a&&a.role; window.__readonly=(a&&a.role==='viewer'); }catch(e){}
+      try{ const a=await (await fetch('/api/auth-status')).json(); window.__role=a&&a.role; window.__readonly=(a&&a.role==='viewer'); applyTabs(a&&a.tabs, a&&a.role); }catch(e){}
       const st=await (await fetch('/api/data')).json();
       const has=(st.racks&&st.racks.length)||Object.keys(st.inv||{}).length;
       if(has){ applyState(st); autoSyncFormat(); }
@@ -4360,6 +4373,7 @@ initApp();
         $('authUser').textContent = (st.id||'') + ' · ' + lbl;
         bar.style.display = 'flex';
         applyRole(role);
+        if(typeof applyTabs==='function') applyTabs(st.tabs, role);
         startPresence();
       }
     }catch(e){}
@@ -4400,12 +4414,30 @@ initApp();
       list.innerHTML = '';
       (d.users||[]).forEach(u=>{
         const p=pmap[u.id], online=p&&p.online;
+        const wrap=document.createElement('div'); wrap.style.cssText='border:1px solid #e2e8f0;border-radius:8px;overflow:hidden';
         const row = document.createElement('div');
-        row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 11px;border:1px solid #e2e8f0;border-radius:8px';
+        row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 11px';
         const label = u.id + (u.id===me ? ' (tu)' : '');
         const dot='<span title="'+(online?'online':'offline')+'" style="flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:'+(online?'#22c55e':'#cbd5e1')+';box-shadow:'+(online?'0 0 0 3px rgba(34,197,94,.2)':'none')+'"></span>';
         const seen='<span style="font-size:12px;color:#94a3b8">'+(online?'online acum':('văzut '+fmtSeen(pnow, p&&p.last_seen)))+'</span>';
-        row.innerHTML = '<span style="display:flex;align-items:center;gap:8px">'+dot+'<b>'+label.replace(/</g,'&lt;')+'</b> '+roleBadge(u.role||'operator')+' '+seen+'</span>';
+        const nTabs = (u.role==='admin')?'toate':(u.tabs?u.tabs.length+'/'+(d.allTabs||[]).length:'toate');
+        row.innerHTML = '<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+dot+'<b>'+label.replace(/</g,'&lt;')+'</b> '+roleBadge(u.role||'operator')+' <span style="font-size:11px;color:#94a3b8">taburi: '+nTabs+'</span> '+seen+'</span>';
+        const actions=document.createElement('span'); actions.style.cssText='display:flex;align-items:center;gap:12px;white-space:nowrap';
+        let ed=null;
+        if(isAdmin && u.role!=='admin'){
+          const tb=document.createElement('a'); tb.href='#'; tb.textContent='taburi'; tb.style.cssText='color:#3a721c;text-decoration:none;font-size:13px';
+          ed=document.createElement('div'); ed.style.cssText='display:none;padding:10px 11px;border-top:1px solid #e2e8f0;background:#f8fafc';
+          const allowed=u.tabs;
+          ed.innerHTML='<p style="margin:0 0 8px;font-size:12px;color:#64748b">Bifează taburile la care are voie „'+u.id.replace(/</g,'&lt;')+'”:</p><div style="display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:10px">'+TAB_DEFS.map(function(t){return '<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" class="tabck" value="'+t[0]+'" '+((!allowed||allowed.indexOf(t[0])>=0)?'checked':'')+'> '+t[1]+'</label>';}).join('')+'</div><button class="main" style="width:auto;padding:8px 14px;margin:0" data-save>Salvează taburi</button>';
+          tb.addEventListener('click',ev=>{ ev.preventDefault(); ed.style.display=(ed.style.display==='none')?'block':'none'; });
+          ed.querySelector('[data-save]').addEventListener('click', async ()=>{
+            const tabs=[...ed.querySelectorAll('.tabck:checked')].map(c=>c.value);
+            if(!tabs.length){ $('usersErr').textContent='Alege cel puțin un tab.'; return; }
+            const r=await fetch('/api/users/'+encodeURIComponent(u.id)+'/tabs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tabs})});
+            if(r.ok){ $('usersErr').textContent=''; loadUsers(); } else { const rd=await r.json().catch(()=>({})); $('usersErr').textContent=rd.error||'Eroare.'; }
+          });
+          actions.appendChild(tb);
+        }
         if(isAdmin){
           const del = document.createElement('a');
           del.href='#'; del.textContent='șterge'; del.style.cssText='color:#dc2626;text-decoration:none;font-size:13px;white-space:nowrap';
@@ -4418,9 +4450,11 @@ initApp();
             if(u.id===me){ location.href='/'; return; }
             loadUsers();
           });
-          row.appendChild(del);
+          actions.appendChild(del);
         }
-        list.appendChild(row);
+        row.appendChild(actions);
+        wrap.appendChild(row); if(ed) wrap.appendChild(ed);
+        list.appendChild(wrap);
       });
       if(!(d.users||[]).length) list.textContent='Niciun utilizator.';
     }catch(e){ list.textContent='Eroare la încărcare.'; }
