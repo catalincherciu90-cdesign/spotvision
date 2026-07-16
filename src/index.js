@@ -168,35 +168,25 @@ let activityReady = false;
 async function ensureActivity(env) {
   if (activityReady) return;
   try {
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, user TEXT NOT NULL, action TEXT NOT NULL, cat TEXT NOT NULL DEFAULT 'platforma')").run();
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, user TEXT NOT NULL, action TEXT NOT NULL, cat TEXT NOT NULL DEFAULT 'platforma', tenant TEXT)").run();
   } catch (e) { /* exista deja */ }
-  try {
-    // migrare: tabel vechi fara coloana de categorie
-    await env.DB.prepare("ALTER TABLE activity ADD COLUMN cat TEXT NOT NULL DEFAULT 'platforma'").run();
-  } catch (e) { /* coloana exista deja */ }
+  try { await env.DB.prepare("ALTER TABLE activity ADD COLUMN cat TEXT NOT NULL DEFAULT 'platforma'").run(); } catch (e) {}
+  try { await env.DB.prepare('ALTER TABLE activity ADD COLUMN tenant TEXT').run(); } catch (e) {}
   activityReady = true;
 }
-async function logAct(env, user, action, cat) {
+async function logAct(env, tenant, user, action, cat) {
   try {
     await ensureActivity(env);
     const c = cat === 'depozit' ? 'depozit' : 'platforma';
-    await env.DB.prepare('INSERT INTO activity (ts, user, action, cat) VALUES (?1, ?2, ?3, ?4)').bind(Date.now(), String(user || '—'), String(action || '').slice(0, 300), c).run();
+    await env.DB.prepare('INSERT INTO activity (ts, user, action, cat, tenant) VALUES (?1, ?2, ?3, ?4, ?5)').bind(Date.now(), String(user || '—'), String(action || '').slice(0, 300), c, tenant || 'default').run();
   } catch (e) { /* nu bloca actiunea din cauza jurnalului */ }
 }
 
-// ---- prezenta (cine e conectat) ----
-let presenceReady = false;
-async function ensurePresence(env) {
-  if (presenceReady) return;
+// ---- prezenta (cine e conectat), pe firma ----
+async function touchPresence(env, tenant, user) {
   try {
-    await env.DB.prepare('CREATE TABLE IF NOT EXISTS presence (user TEXT PRIMARY KEY, last_seen INTEGER NOT NULL)').run();
-  } catch (e) { /* exista deja */ }
-  presenceReady = true;
-}
-async function touchPresence(env, user) {
-  try {
-    await ensurePresence(env);
-    await env.DB.prepare('INSERT INTO presence (user, last_seen) VALUES (?1, ?2) ON CONFLICT(user) DO UPDATE SET last_seen = ?2').bind(String(user), Date.now()).run();
+    await ensureTenancy(env);
+    await env.DB.prepare('INSERT INTO presence_mt (tenant, user, last_seen) VALUES (?1, ?2, ?3) ON CONFLICT(tenant, user) DO UPDATE SET last_seen = ?3').bind(tenant || 'default', String(user), Date.now()).run();
   } catch (e) { /* best-effort */ }
 }
 
@@ -210,13 +200,50 @@ function tooMany(key, max, windowMs) {
   return e.n > max;
 }
 
-// ---- acces D1 (date aplicatie) ----
-async function getConfig(env) {
-  const row = await env.DB.prepare('SELECT racks, g FROM config WHERE id = 1').first();
+// ---- multi-tenant (gestiuni multiple, date izolate pe firma) ----
+let tenancyReady = false;
+async function ensureTenancy(env) {
+  if (tenancyReady) return;
+  try { await env.DB.prepare('CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL)').run(); } catch (e) {}
+  try { await env.DB.prepare('ALTER TABLE users ADD COLUMN tenant TEXT').run(); } catch (e) {}
+  try { await env.DB.prepare("CREATE TABLE IF NOT EXISTS config_mt (tenant TEXT PRIMARY KEY, racks TEXT NOT NULL DEFAULT '[]', g TEXT NOT NULL DEFAULT '{}')").run(); } catch (e) {}
+  try { await env.DB.prepare('CREATE TABLE IF NOT EXISTS inventory_mt (tenant TEXT NOT NULL, code TEXT NOT NULL, items TEXT NOT NULL, PRIMARY KEY (tenant, code))').run(); } catch (e) {}
+  try { await env.DB.prepare('CREATE TABLE IF NOT EXISTS presence_mt (tenant TEXT NOT NULL, user TEXT NOT NULL, last_seen INTEGER NOT NULL, PRIMARY KEY (tenant, user))').run(); } catch (e) {}
+  // migrare o singura data: datele vechi (single-tenant) -> firma 'default'
+  try {
+    const orphan = await env.DB.prepare('SELECT COUNT(*) AS n FROM users WHERE tenant IS NULL').first();
+    if (orphan && orphan.n > 0) {
+      await env.DB.prepare("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES ('default', 'Firma mea', ?1)").bind(Date.now()).run();
+      await env.DB.prepare("UPDATE users SET tenant = 'default' WHERE tenant IS NULL").run();
+      try { const c = await env.DB.prepare('SELECT racks, g FROM config WHERE id = 1').first(); if (c) await env.DB.prepare('INSERT OR IGNORE INTO config_mt (tenant, racks, g) VALUES (?1, ?2, ?3)').bind('default', c.racks, c.g).run(); } catch (e) {}
+      try { await env.DB.prepare("INSERT OR IGNORE INTO inventory_mt (tenant, code, items) SELECT 'default', code, items FROM inventory").run(); } catch (e) {}
+    }
+  } catch (e) {}
+  tenancyReady = true;
+}
+async function getUserTenant(env, id) {
+  const r = await env.DB.prepare('SELECT tenant FROM users WHERE id = ?1').bind(id).first();
+  return r ? (r.tenant || 'default') : null;
+}
+async function tenantName(env, tid) {
+  const r = await env.DB.prepare('SELECT name FROM tenants WHERE id = ?1').bind(tid).first();
+  return r ? r.name : '';
+}
+async function tenantUserCount(env, tid) {
+  const r = await env.DB.prepare('SELECT COUNT(*) AS n FROM users WHERE tenant = ?1').bind(tid).first();
+  return r ? r.n : 0;
+}
+
+// ---- acces D1 (date aplicatie), izolat pe firma (tenant) ----
+async function getConfig(env, tenant) {
+  const row = await env.DB.prepare('SELECT racks, g FROM config_mt WHERE tenant = ?1').bind(tenant).first();
   return { racks: row ? JSON.parse(row.racks) : [], g: row ? JSON.parse(row.g) : {} };
 }
-async function getInventory(env) {
-  const { results } = await env.DB.prepare('SELECT code, items FROM inventory').all();
+async function putConfig(env, tenant, racks, g) {
+  await env.DB.prepare('INSERT INTO config_mt (tenant, racks, g) VALUES (?1, COALESCE(?2,\'[]\'), COALESCE(?3,\'{}\')) ON CONFLICT(tenant) DO UPDATE SET racks = COALESCE(?2, racks), g = COALESCE(?3, g)').bind(tenant, racks, g).run();
+}
+async function getInventory(env, tenant) {
+  const { results } = await env.DB.prepare('SELECT code, items FROM inventory_mt WHERE tenant = ?1').bind(tenant).all();
   const inv = {};
   for (const r of results || []) inv[r.code] = JSON.parse(r.items);
   return inv;
@@ -232,7 +259,7 @@ export default {
 
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
-    if (p.startsWith('/api/')) { await ensureRole(env); await ensureTabs(env); }
+    if (p.startsWith('/api/')) { await ensureRole(env); await ensureTabs(env); await ensureTenancy(env); }
 
     // ---------- rute publice de auth ----------
     if (p === '/api/auth-status' && method === 'GET') {
@@ -240,7 +267,31 @@ export default {
       const setup = (await userCount(env)) === 0;
       const role = session ? await getRole(env, session.sub) : null;
       const tabs = session ? await getTabs(env, session.sub) : null;
-      return json({ setup, authenticated: !!session, id: session ? session.sub : null, role, tabs });
+      const tid = session ? (session.t || await getUserTenant(env, session.sub)) : null;
+      const tname = tid ? await tenantName(env, tid) : '';
+      return json({ setup, authenticated: !!session, id: session ? session.sub : null, role, tabs, tenant: tid, tenantName: tname });
+    }
+
+    // ---------- inregistrare firma noua (public): creeaza gestiune + admin ----------
+    if (p === '/api/signup' && method === 'POST') {
+      if (tooMany(`signup:${ip}`, 8, 10 * 60000)) return json({ error: 'Prea multe încercări. Revino în câteva minute.' }, 429);
+      const { company, id, password } = await readBody(req);
+      const uid = String(id || '').trim();
+      const cname = String(company || '').trim();
+      if (!cname) return json({ error: 'Completează numele firmei.' }, 400);
+      if (!/^[a-zA-Z0-9._-]{2,40}$/.test(uid)) return json({ error: 'Id-ul contului: 2-40 caractere (litere, cifre, . _ -).' }, 400);
+      if (String(password || '').length < 6) return json({ error: 'Parola: minim 6 caractere.' }, 400);
+      const exists = await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(uid).first();
+      if (exists) return json({ error: 'Acest id de cont e deja folosit. Alege altul.' }, 409);
+      const tid = 't_' + toHex(crypto.getRandomValues(new Uint8Array(8)));
+      await env.DB.prepare('INSERT INTO tenants (id, name, created_at) VALUES (?1, ?2, ?3)').bind(tid, cname.slice(0, 60), Date.now()).run();
+      const hash = await hashPassword(String(password));
+      await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role, tenant) VALUES (?1, ?2, ?3, ?4, ?5)').bind(uid, hash, Date.now(), 'admin', tid).run();
+      await env.DB.prepare("INSERT OR IGNORE INTO config_mt (tenant, racks, g) VALUES (?1, '[]', '{}')").bind(tid).run();
+      await logAct(env, tid, uid, 'A creat firma „' + cname + '”', 'platforma');
+      await touchPresence(env, tid, uid);
+      const token = await signJWT({ sub: uid, t: tid, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }, await getAuthSecret(env));
+      return json({ ok: true, id: uid, tenant: tid }, 200, { 'Set-Cookie': sessionCookie(token) });
     }
 
     if (p === '/api/register' && method === 'POST') {
@@ -250,27 +301,20 @@ export default {
       if (!uid || !password) return json({ error: 'Id și parolă obligatorii.' }, 400);
       if (String(password).length < 4) return json({ error: 'Parola trebuie să aibă minim 4 caractere.' }, 400);
 
-      const count = await userCount(env);
-      const session = await getSession(req, env);
-      // primul cont e liber (bootstrap admin); ulterior doar ADMINII pot adauga colegi
-      if (count > 0 && !session) return json({ error: 'Trebuie să fii autentificat ca să adaugi conturi.' }, 401);
-      if (count > 0 && (await getRole(env, session.sub)) !== 'admin') return json({ error: 'Doar administratorii pot adăuga utilizatori.' }, 403);
+      // adaugarea de colegi se face DOAR de un admin, in firma lui
+      const s = await getSession(req, env);
+      if (!s) return json({ error: 'Trebuie să fii autentificat. Pentru o firmă nouă folosește „Creează firmă nouă”.' }, 401);
+      if ((await getRole(env, s.sub)) !== 'admin') return json({ error: 'Doar administratorii pot adăuga utilizatori.' }, 403);
+      const stid = s.t || await getUserTenant(env, s.sub);
 
       const exists = await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(uid).first();
-      if (exists) return json({ error: 'Există deja un cont cu acest id.' }, 409);
+      if (exists) return json({ error: 'Acest id de cont e deja folosit (pe întreaga platformă). Alege altul.' }, 409);
 
-      // primul cont = admin; urmatoarele = rolul ales (implicit operator)
-      const newRole = count === 0 ? 'admin' : (ROLES.includes(role) ? role : 'operator');
+      const newRole = ROLES.includes(role) ? role : 'operator';
       const hash = await hashPassword(String(password));
-      await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role) VALUES (?1, ?2, ?3, ?4)')
-        .bind(uid, hash, Date.now(), newRole).run();
-      await logAct(env, (session && session.sub) || uid, 'A creat contul „' + uid + '” (' + newRole + ')');
-
-      // la bootstrap (primul cont) auto-login
-      if (count === 0) {
-        const token = await signJWT({ sub: uid, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }, await getAuthSecret(env));
-        return json({ ok: true, id: uid }, 200, { 'Set-Cookie': sessionCookie(token) });
-      }
+      await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role, tenant) VALUES (?1, ?2, ?3, ?4, ?5)')
+        .bind(uid, hash, Date.now(), newRole, stid).run();
+      await logAct(env, stid, s.sub, 'A creat contul „' + uid + '” (' + newRole + ')');
       return json({ ok: true, id: uid });
     }
 
@@ -278,13 +322,14 @@ export default {
       if (tooMany(`login:${ip}`, 15, 5 * 60000)) return json({ error: 'Prea multe încercări. Revino în câteva minute.' }, 429);
       const { id, password } = await readBody(req);
       const uid = String(id || '').trim();
-      const user = uid ? await env.DB.prepare('SELECT id, pass_hash FROM users WHERE id = ?1').bind(uid).first() : null;
+      const user = uid ? await env.DB.prepare('SELECT id, pass_hash, tenant FROM users WHERE id = ?1').bind(uid).first() : null;
       if (!user || !(await verifyPassword(String(password || ''), user.pass_hash))) {
         return json({ error: 'Id sau parolă greșite.' }, 401);
       }
-      const token = await signJWT({ sub: user.id, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }, await getAuthSecret(env));
-      await logAct(env, user.id, 'S-a autentificat');
-      await touchPresence(env, user.id);
+      const tid = user.tenant || 'default';
+      const token = await signJWT({ sub: user.id, t: tid, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }, await getAuthSecret(env));
+      await logAct(env, tid, user.id, 'S-a autentificat');
+      await touchPresence(env, tid, user.id);
       return json({ ok: true, id: user.id }, 200, { 'Set-Cookie': sessionCookie(token) });
     }
 
@@ -295,28 +340,29 @@ export default {
     // ---------- de aici incolo: totul cere sesiune ----------
     const session = await getSession(req, env);
     const myRole = session ? await getRole(env, session.sub) : null;
+    const tid = session ? (session.t || await getUserTenant(env, session.sub)) : null;
 
-    // gestionare utilizatori
+    // gestionare utilizatori (doar din propria firma)
     if (p === '/api/users') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
       if (method === 'GET') {
-        const { results } = await env.DB.prepare('SELECT id, created_at, role, tabs FROM users ORDER BY created_at').all();
+        const { results } = await env.DB.prepare('SELECT id, created_at, role, tabs FROM users WHERE tenant = ?1 ORDER BY created_at').bind(tid).all();
         const users = (results || []).map(u => ({ id: u.id, created_at: u.created_at, role: u.role, tabs: parseTabs(u.tabs) }));
-        return json({ users, me: session.sub, myRole, allTabs: TAB_KEYS });
+        return json({ users, me: session.sub, myRole, allTabs: TAB_KEYS, tenantName: await tenantName(env, tid) });
       }
     }
-    // setare taburi permise pentru un utilizator (admin)
+    // setare taburi permise pentru un utilizator (admin, din firma lui)
     const mTabs = p.match(/^\/api\/users\/(.+)\/tabs$/);
     if (mTabs && method === 'POST') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
       if (myRole !== 'admin') return json({ error: 'Doar administratorii pot schimba permisiunile.' }, 403);
       const target = decodeURIComponent(mTabs[1]);
+      if (await getUserTenant(env, target) !== tid) return json({ error: 'Utilizator din altă firmă.' }, 403);
       const body = await readBody(req);
       let tabs = Array.isArray(body && body.tabs) ? body.tabs.filter(t => TAB_KEYS.includes(t)) : null;
-      // null / lista completa => acces la toate (stocam NULL)
       const store = (!tabs || tabs.length >= TAB_KEYS.length) ? null : JSON.stringify(tabs);
-      await env.DB.prepare('UPDATE users SET tabs = ?1 WHERE id = ?2').bind(store, target).run();
-      await logAct(env, session.sub, 'A schimbat taburile pentru „' + target + '”');
+      await env.DB.prepare('UPDATE users SET tabs = ?1 WHERE id = ?2 AND tenant = ?3').bind(store, target, tid).run();
+      await logAct(env, tid, session.sub, 'A schimbat taburile pentru „' + target + '”');
       return json({ ok: true, tabs: parseTabs(store) });
     }
     const mUser = p.match(/^\/api\/users\/(.+)$/);
@@ -324,21 +370,21 @@ export default {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
       if (myRole !== 'admin') return json({ error: 'Doar administratorii pot șterge utilizatori.' }, 403);
       const target = decodeURIComponent(mUser[1]);
-      if ((await userCount(env)) <= 1) return json({ error: 'Nu poți șterge ultimul cont.' }, 400);
-      await env.DB.prepare('DELETE FROM users WHERE id = ?1').bind(target).run();
-      await logAct(env, session.sub, 'A șters contul „' + target + '”');
+      if (await getUserTenant(env, target) !== tid) return json({ error: 'Utilizator din altă firmă.' }, 403);
+      if ((await tenantUserCount(env, tid)) <= 1) return json({ error: 'Nu poți șterge ultimul cont din firmă.' }, 400);
+      await env.DB.prepare('DELETE FROM users WHERE id = ?1 AND tenant = ?2').bind(target, tid).run();
+      await logAct(env, tid, session.sub, 'A șters contul „' + target + '”');
       const headers = target === session.sub ? { 'Set-Cookie': clearCookie() } : undefined;
       return json({ ok: true }, 200, headers);
     }
 
-    // ---------- prezenta (permisa si pentru viewer: doar te marcheaza online) ----------
+    // ---------- prezenta (permisa si pentru viewer), izolata pe firma ----------
     if (p === '/api/presence') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
-      await ensurePresence(env);
-      if (method === 'POST') { await touchPresence(env, session.sub); }
-      const winMs = 90 * 1000; // online = vazut in ultimele 90s
-      const cutoff = Date.now() - 30 * 60000; // trimite doar prezentele din ultima jumatate de ora
-      const { results } = await env.DB.prepare('SELECT user, last_seen FROM presence WHERE last_seen > ?1 ORDER BY last_seen DESC').bind(cutoff).all();
+      await ensureTenancy(env);
+      if (method === 'POST') { await touchPresence(env, tid, session.sub); }
+      const winMs = 90 * 1000, cutoff = Date.now() - 30 * 60000;
+      const { results } = await env.DB.prepare('SELECT user, last_seen FROM presence_mt WHERE tenant = ?1 AND last_seen > ?2 ORDER BY last_seen DESC').bind(tid, cutoff).all();
       const now = Date.now();
       const users = (results || []).map(r => ({ user: r.user, last_seen: r.last_seen, online: (now - r.last_seen) <= winMs }));
       return json({ now, users, me: session.sub });
@@ -351,20 +397,20 @@ export default {
       if (method !== 'GET' && myRole === 'viewer') return json({ error: 'Cont de vizualizare — doar citire.' }, 403);
       try {
         if (p === '/api/data' && method === 'GET') {
-          const cfg = await getConfig(env);
-          const inv = await getInventory(env);
+          const cfg = await getConfig(env, tid);
+          const inv = await getInventory(env, tid);
           return json({ racks: cfg.racks, g: cfg.g, inv });
         }
-        if (p === '/api/inventory' && method === 'GET') return json(await getInventory(env));
+        if (p === '/api/inventory' && method === 'GET') return json(await getInventory(env, tid));
 
         if (p === '/api/activity' && method === 'GET') {
           await ensureActivity(env);
           const catQ = url.searchParams.get('cat');
-          let q, res;
+          let res;
           if (catQ === 'depozit' || catQ === 'platforma') {
-            res = await env.DB.prepare('SELECT ts, user, action, cat FROM activity WHERE cat = ?1 ORDER BY id DESC LIMIT 300').bind(catQ).all();
+            res = await env.DB.prepare('SELECT ts, user, action, cat FROM activity WHERE tenant = ?1 AND cat = ?2 ORDER BY id DESC LIMIT 300').bind(tid, catQ).all();
           } else {
-            res = await env.DB.prepare('SELECT ts, user, action, cat FROM activity ORDER BY id DESC LIMIT 300').all();
+            res = await env.DB.prepare('SELECT ts, user, action, cat FROM activity WHERE tenant = ?1 ORDER BY id DESC LIMIT 300').bind(tid).all();
           }
           return json({ items: res.results || [] });
         }
@@ -372,7 +418,7 @@ export default {
           const body = await readBody(req);
           const action = String((body && body.action) || '').trim();
           const cat = (body && body.cat) === 'depozit' ? 'depozit' : 'platforma';
-          if (action) await logAct(env, session.sub, action, cat);
+          if (action) await logAct(env, tid, session.sub, action, cat);
           return json({ ok: true });
         }
 
@@ -380,16 +426,16 @@ export default {
           const body = await readBody(req);
           const racks = Array.isArray(body.racks) ? JSON.stringify(body.racks) : null;
           const g = body.g && typeof body.g === 'object' ? JSON.stringify(body.g) : null;
-          await env.DB.prepare('UPDATE config SET racks = COALESCE(?1, racks), g = COALESCE(?2, g) WHERE id = 1').bind(racks, g).run();
+          await putConfig(env, tid, racks, g);
           return json({ ok: true });
         }
 
         if (p === '/api/inventory' && method === 'PUT') {
           const body = await readBody(req);
           const obj = body && typeof body === 'object' ? body : {};
-          const stmts = [env.DB.prepare('DELETE FROM inventory')];
+          const stmts = [env.DB.prepare('DELETE FROM inventory_mt WHERE tenant = ?1').bind(tid)];
           for (const code of Object.keys(obj)) {
-            stmts.push(env.DB.prepare('INSERT OR REPLACE INTO inventory (code, items) VALUES (?1, ?2)').bind(code.toUpperCase(), JSON.stringify(obj[code])));
+            stmts.push(env.DB.prepare('INSERT OR REPLACE INTO inventory_mt (tenant, code, items) VALUES (?1, ?2, ?3)').bind(tid, code.toUpperCase(), JSON.stringify(obj[code])));
           }
           await env.DB.batch(stmts);
           return json({ ok: true, locations: Object.keys(obj).length });
@@ -401,14 +447,14 @@ export default {
           if (method === 'PUT') {
             const arr = await readBody(req);
             if (Array.isArray(arr) && arr.length) {
-              await env.DB.prepare('INSERT OR REPLACE INTO inventory (code, items) VALUES (?1, ?2)').bind(code, JSON.stringify(arr)).run();
+              await env.DB.prepare('INSERT OR REPLACE INTO inventory_mt (tenant, code, items) VALUES (?1, ?2, ?3)').bind(tid, code, JSON.stringify(arr)).run();
             } else {
-              await env.DB.prepare('DELETE FROM inventory WHERE code = ?1').bind(code).run();
+              await env.DB.prepare('DELETE FROM inventory_mt WHERE tenant = ?1 AND code = ?2').bind(tid, code).run();
             }
             return json({ ok: true });
           }
           if (method === 'DELETE') {
-            await env.DB.prepare('DELETE FROM inventory WHERE code = ?1').bind(code).run();
+            await env.DB.prepare('DELETE FROM inventory_mt WHERE tenant = ?1 AND code = ?2').bind(tid, code).run();
             return json({ ok: true });
           }
         }
@@ -445,25 +491,58 @@ function loginPage(setup) {
   button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:9px;background:#6cb33f;color:#08131f;font-weight:700;font-size:15px;cursor:pointer}
   button:hover{background:#57a02c} button:disabled{opacity:.6;cursor:default}
   .err{margin-top:14px;color:#fca5a5;font-size:14px;min-height:18px}
+  .toggle{margin-top:16px;text-align:center;font-size:13px;color:#94a3b8}
+  .toggle a{color:#6cb33f;text-decoration:none;font-weight:600;cursor:pointer}
+  .hidden{display:none}
 </style></head><body>
 <form class="card" id="f">
-  <h1>${setup ? 'Creează contul de administrator' : 'Autentificare'}</h1>
-  <p class="sub">${setup ? 'Primul cont din aplicație. Cu el vei putea adăuga apoi colegi.' : 'Warehouse Organizer'}</p>
+  <h1 id="ttl"></h1>
+  <p class="sub" id="sub"></p>
+  <div id="companyWrap" class="hidden">
+    <label>Numele firmei</label>
+    <input id="company" autocomplete="organization" placeholder="ex. Depozit SRL">
+  </div>
   <label>Id (utilizator)</label>
-  <input id="uid" autocomplete="username" autofocus required>
+  <input id="uid" autocomplete="username" required>
   <label>Parolă</label>
-  <input id="pwd" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" required>
-  <button id="btn" type="submit">${setup ? 'Creează cont' : 'Intră'}</button>
+  <input id="pwd" type="password" autocomplete="current-password" required>
+  <button id="btn" type="submit"></button>
   <div class="err" id="err"></div>
+  <div class="toggle" id="toggle"></div>
 </form>
 <script>
-  const SETUP=${setup ? 'true' : 'false'};
+  const FORCE_SIGNUP=${setup ? 'true' : 'false'};
+  let mode = FORCE_SIGNUP ? 'signup' : 'login';
   const f=document.getElementById('f'), err=document.getElementById('err'), btn=document.getElementById('btn');
+  const companyWrap=document.getElementById('companyWrap'), ttl=document.getElementById('ttl'), sub=document.getElementById('sub'), toggle=document.getElementById('toggle');
+  function render(){
+    err.textContent='';
+    if(mode==='signup'){
+      ttl.textContent='Creează o firmă nouă';
+      sub.textContent='Firma ta primește o bază de date proprie, separată de celelalte.';
+      companyWrap.classList.remove('hidden');
+      document.getElementById('pwd').setAttribute('autocomplete','new-password');
+      btn.textContent='Creează firma';
+      toggle.innerHTML = FORCE_SIGNUP ? '' : 'Ai deja cont? <a id="tg">Autentifică-te</a>';
+    } else {
+      ttl.textContent='Autentificare';
+      sub.textContent='Warehouse Organizer';
+      companyWrap.classList.add('hidden');
+      document.getElementById('pwd').setAttribute('autocomplete','current-password');
+      btn.textContent='Intră';
+      toggle.innerHTML = 'Firmă nouă? <a id="tg">Creează un cont de firmă</a>';
+    }
+    const tg=document.getElementById('tg'); if(tg) tg.addEventListener('click', ()=>{ mode = mode==='signup'?'login':'signup'; render(); });
+  }
+  render();
   f.addEventListener('submit', async (e)=>{
     e.preventDefault(); err.textContent=''; btn.disabled=true;
     const id=document.getElementById('uid').value.trim(), password=document.getElementById('pwd').value;
+    const company=document.getElementById('company').value.trim();
     try{
-      const r=await fetch(SETUP?'/api/register':'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password})});
+      const url = mode==='signup' ? '/api/signup' : '/api/login';
+      const payload = mode==='signup' ? {company,id,password} : {id,password};
+      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const d=await r.json().catch(()=>({}));
       if(r.ok){ location.reload(); return; }
       err.textContent=d.error||'Eroare.'; btn.disabled=false;
