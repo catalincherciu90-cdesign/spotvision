@@ -226,6 +226,10 @@
   .pc-row .pc-qty{grid-row:1 / span 2;grid-column:2;width:74px;text-align:center;padding:8px}
   /* lista de comenzi (cos) */
   /* jurnal de activitate */
+  .logtabs{display:inline-flex;gap:5px;background:#eaf0e8;padding:5px;border-radius:12px;margin-bottom:12px}
+  .logtab{background:none;border:0;border-radius:8px;padding:8px 14px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;transition:background .15s,color .15s}
+  .logtab:hover{background:#fff;color:var(--ink)}
+  .logtab.active{background:var(--accent);color:#fff}
   #logList{display:flex;flex-direction:column}
   .log-row{display:flex;gap:12px;align-items:baseline;padding:10px 4px;border-bottom:1px solid var(--line)}
   .log-row .lg-time{flex:0 0 auto;width:132px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -605,6 +609,10 @@
     </div>
   </div>
   <div>
+    <div id="logTabs" class="logtabs noprint">
+      <button class="logtab active" data-cat="depozit" type="button">📦 Activitate depozit</button>
+      <button class="logtab" data-cat="platforma" type="button">⚙️ Activitate platformă</button>
+    </div>
     <p class="sub noprint">Ultimele acțiuni (max 300).</p>
     <div class="stage"><div id="logList"></div></div>
   </div>
@@ -3221,7 +3229,7 @@ $('locPanel').addEventListener('click', e=>{
   if(e.target.classList.contains('delp')){
     const b=e.target, code=(selectedCode||'').toUpperCase(), arr=inventory[code]||[];
     const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cod||'')===(b.dataset.cod||'') && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
-    if(i>=0){ const nm=b.dataset.produs; arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); showLoc(code); logActivity('A scos „'+nm+'” din locația '+code); }
+    if(i>=0){ const nm=b.dataset.produs; arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); showLoc(code); logActivity('A scos „'+nm+'” din locația '+code,'depozit'); }
   }
 });
 function readInvFile(file,msgId){
@@ -3236,13 +3244,13 @@ function readInvFile(file,msgId){
     let msg=`Încărcat: ${n} rânduri, ${loc} locații — schema actualizată automat.`;
     if(res && res.unmatched>0) msg+=` ⚠️ ${res.unmatched} locații cu cod necunoscut (nu apar pe schemă) — verifică formatul coloanei „Locatie" în Excel.`;
     $(msgId).textContent = res ? msg : `Încărcat: ${n} rânduri, ${loc} locații ocupate.`;
-    logActivity(`A încărcat inventarul din Excel — ${n} rânduri, ${loc} locații`);
+    logActivity(`A încărcat inventarul din Excel — ${n} rânduri, ${loc} locații`,'depozit');
   }catch(err){ $(msgId).textContent='Fișier invalid.'; } };
   rd.readAsArrayBuffer(file);
 }
 $('btnInv').addEventListener('click',()=>$('fileInv').click());
 $('fileInv').addEventListener('change',e=>{ if(e.target.files[0]) readInvFile(e.target.files[0],'invStatus'); e.target.value=''; });
-$('btnInvClear').addEventListener('click',()=>{ for(const k in inventory) delete inventory[k]; selectedCode=''; $('locPanel').style.display='none'; pushAllInventory(); refresh(); $('invStatus').textContent='Inventar șters.'; logActivity('A șters tot inventarul'); });
+$('btnInvClear').addEventListener('click',()=>{ for(const k in inventory) delete inventory[k]; selectedCode=''; $('locPanel').style.display='none'; pushAllInventory(); refresh(); $('invStatus').textContent='Inventar șters.'; logActivity('A șters tot inventarul','depozit'); });
 $('btnInvModel').addEventListener('click',()=>{
   const g=globals(), r=readRacks()[0];
   const c=(L,j)=>locCode(r.name,L,j,g);
@@ -3360,7 +3368,7 @@ function collectProds(){
   scheduleLocLog(code);
 }
 let locLogTimer, locLogCode='';
-function scheduleLocLog(code){ locLogCode=code; clearTimeout(locLogTimer); locLogTimer=setTimeout(()=>{ logActivity('A actualizat produsele la locația '+locLogCode); },1500); }
+function scheduleLocLog(code){ locLogCode=code; clearTimeout(locLogTimer); locLogTimer=setTimeout(()=>{ logActivity('A actualizat produsele la locația '+locLogCode,'depozit'); },1500); }
 let invCodeQuery='';
 function renderInvTable(){
   const all=Object.keys(inventory).filter(k=>inventory[k]&&inventory[k].length).sort();
@@ -3424,7 +3432,7 @@ $('invTableWrap').addEventListener('click', e=>{
   if(e.target.classList.contains('delp')){
     const b=e.target, code=b.dataset.code.toUpperCase(), arr=inventory[code]||[];
     const i=arr.findIndex(x=>String(x.produs)===b.dataset.produs && String(x.cod||'')===(b.dataset.cod||'') && String(x.cant)===b.dataset.cant && String(x.data||'')===b.dataset.data);
-    if(i>=0){ const nm=b.dataset.produs; arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); renderInvTable(); logActivity('A scos „'+nm+'” din locația '+code); }
+    if(i>=0){ const nm=b.dataset.produs; arr.splice(i,1); if(!arr.length) delete inventory[code]; pushLoc(code, inventory[code]||[]); saveState(); renderInvTable(); logActivity('A scos „'+nm+'” din locația '+code,'depozit'); }
     return;
   }
   const c=e.target.closest('.code'); if(c) goToSchema(c.getAttribute('data-code'));
@@ -3919,7 +3927,7 @@ function confirmPicking(){
   saveState(); refresh(); pickProdOptions();
   const tot=lastPicks.picks.reduce((a,p)=>a+p.take,0);
   const nLoc=new Set(lastPicks.picks.map(p=>p.code)).size;
-  logActivity(`A confirmat o culegere — ${tot} buc din ${nLoc} locații scăzute din stoc`);
+  logActivity(`A confirmat o culegere — ${tot} buc din ${nLoc} locații scăzute din stoc`,'depozit');
   lastPicks=null; renderPicking(null);
   $('pickStatus').innerHTML=`<span class="pk-done">✓ Ridicare confirmată — ${tot} buc scăzute din stoc.</span>`;
 }
@@ -3946,21 +3954,24 @@ $('pickScan').addEventListener('click', ()=>openScanner('pick'));
 $('pickChooserAdd').addEventListener('click', applyPickChooser);
 $('pickChooserClose').addEventListener('click', closePickChooser);
 
-// ---------- JURNAL DE ACTIVITATE ----------
-function logActivity(action){ if(!SERVER||window.__readonly||!action) return; try{ fetch('/api/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:String(action)})}); }catch(_){} }
+// ---------- JURNAL DE ACTIVITATE (depozit / platforma) ----------
+let logCat='depozit';
+function logActivity(action,cat){ if(!SERVER||window.__readonly||!action) return; try{ fetch('/api/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:String(action),cat:(cat==='depozit'?'depozit':'platforma')})}); }catch(_){} }
 function fmtLogTime(ts){ try{ const d=new Date(+ts); const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`; }catch(_){ return ''; } }
 async function renderLog(){
   const box=$('logList'); if(!box) return;
+  document.querySelectorAll('#logTabs .logtab').forEach(b=>b.classList.toggle('active', b.dataset.cat===logCat));
   if(!SERVER){ box.innerHTML='<p class="log-empty">Jurnalul e disponibil doar când aplicația e conectată la server.</p>'; return; }
   box.innerHTML='<p class="log-empty">Se încarcă…</p>';
   try{
-    const d=await (await fetch('/api/activity')).json();
+    const d=await (await fetch('/api/activity?cat='+encodeURIComponent(logCat))).json();
     const items=d.items||[];
-    if(!items.length){ box.innerHTML='<p class="log-empty">Nicio activitate încă.</p>'; return; }
+    if(!items.length){ box.innerHTML='<p class="log-empty">Nicio activitate în această categorie încă.</p>'; return; }
     box.innerHTML=items.map(it=>`<div class="log-row"><span class="lg-time">${fmtLogTime(it.ts)}</span><span class="lg-user">${esc(it.user||'—')}</span><span class="lg-act">${esc(it.action||'')}</span></div>`).join('');
   }catch(e){ box.innerHTML='<p class="log-empty">Nu am putut încărca jurnalul.</p>'; }
 }
 $('logRefresh').addEventListener('click', renderLog);
+$('logTabs').addEventListener('click', e=>{ const b=e.target.closest('.logtab'); if(!b) return; logCat=b.dataset.cat; renderLog(); });
 let schemaFilterInit=false;
 function syncSchemaFilter(){
   const sel=$('schemaRackFilter'); if(!sel) return; const prev=sel.value, rs=readRacks();
