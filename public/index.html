@@ -179,6 +179,7 @@
   .label{width:210mm;height:148.5mm;box-sizing:border-box;background:#fff;border:1px solid #cbd5e1;
     padding:10mm 36mm 10mm 14mm;display:flex;flex-direction:column;align-items:center;justify-content:center;
     text-align:center;overflow:hidden;position:relative;transform-origin:top center}
+  .label .lbl-logo{max-height:20mm;max-width:80mm;object-fit:contain;margin-bottom:3mm}
   .label .lbl-title{font-size:9mm;font-weight:800;letter-spacing:.06em;color:#334155;margin-bottom:2mm}
   .label .lbl-code{font-size:24mm;font-weight:900;color:#0f172a;line-height:1;letter-spacing:.02em;word-break:break-all}
   .label .lbl-bc{margin:4mm 0 2mm}
@@ -227,7 +228,7 @@
 </head>
 <body>
 <header>
-  <h1>Warehouse Organizer</h1>
+  <div style="display:flex;align-items:center;gap:14px"><img id="appLogo" alt="logo" style="display:none;max-height:46px;max-width:180px;width:auto;border-radius:6px"><h1 style="margin:0">Warehouse Organizer</h1></div>
   <p>Schema locațiilor, dimensiunile fizice și schița tehnică cotată — pentru unul sau mai multe rafturi.</p>
   <div class="tabs">
     <button class="tab active" data-v="schema">Schemă locații</button>
@@ -325,6 +326,17 @@
       <div class="field"><label>Capacitate / palet (buc)</label>
         <input id="capacity" type="number" min="0" value="0" placeholder="0 = doar ocupat/liber">
         <span class="hint">Colorează celulele după cât de pline sunt. 0 = dezactivat.</span></div>
+    </div>
+    <div class="card">
+      <h2>Logo aplicație</h2>
+      <div id="logoBox" style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <img id="logoPreview" alt="" style="display:none;max-height:56px;max-width:150px;border:1px solid var(--line);border-radius:8px;padding:4px;background:#fff">
+        <span class="hint" id="logoHint" style="margin:0">Niciun logo încărcat.</span>
+      </div>
+      <button class="main ghost" id="btnLogo">🖼️ Încarcă logo</button>
+      <input type="file" id="fileLogo" accept="image/*" hidden>
+      <button class="main ghost" id="btnLogoRemove" style="margin-top:8px;color:#b91c1c;background:#fee2e2;display:none">Șterge logo</button>
+      <p class="hint" style="margin-top:8px">Apare în antet și pe etichete. Se redimensionează automat și se salvează pentru toți colegii.</p>
     </div>
     <div class="card">
       <h2>Salvare (Excel)</h2>
@@ -2949,7 +2961,28 @@ let orderMigrated=false; // marcaj: noul format implicit (palet-nivel) a fost ap
 function globals(){
   return {ldig:+$('ldig').value||2,pdig:+$('pdig').value||2,sep:$('sep').value.trim()||'-',
     lpref:$('lpref').value,ppref:$('ppref').value,base:$('base').value,pdir:$('pdir').value,mode:$('cellmode').value,
-    cap:+$('capacity').value||0, order:($('codeorder')?$('codeorder').value:'pl')||'pl', omig:orderMigrated};
+    cap:+$('capacity').value||0, order:($('codeorder')?$('codeorder').value:'pl')||'pl', omig:orderMigrated, logo:logoData||''};
+}
+// --- logo aplicatie (salvat in config, partajat) ---
+let logoData='';
+function applyLogo(){
+  const img=$('appLogo'), pv=$('logoPreview'), hint=$('logoHint'), rm=$('btnLogoRemove');
+  if(logoData){ if(img){img.src=logoData;img.style.display='';} if(pv){pv.src=logoData;pv.style.display='';} if(hint) hint.style.display='none'; if(rm) rm.style.display=''; }
+  else { if(img){img.style.display='none';img.removeAttribute('src');} if(pv){pv.style.display='none';pv.removeAttribute('src');} if(hint) hint.style.display=''; if(rm) rm.style.display='none'; }
+}
+function setLogo(data){ logoData=data||''; applyLogo(); if(typeof saveState==='function') saveState(); }
+// redimensioneaza imaginea la max 240px si o salveaza ca data URL (PNG)
+function loadLogoFile(file){
+  if(!file) return;
+  const rd=new FileReader();
+  rd.onload=e=>{ const im=new Image(); im.onload=()=>{
+    const max=240, sc=Math.min(1, max/Math.max(im.width,im.height));
+    const w=Math.max(1,Math.round(im.width*sc)), h=Math.max(1,Math.round(im.height*sc));
+    const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+    cv.getContext('2d').drawImage(im,0,0,w,h);
+    try{ setLogo(cv.toDataURL('image/png')); }catch(_){ setLogo(e.target.result); }
+  }; im.onerror=()=>{ setLogo(e.target.result); }; im.src=e.target.result; };
+  rd.readAsDataURL(file);
 }
 // Generează codul de locație respectând ordinea (nivel-palet sau palet-nivel).
 function locCode(name,L,P,g){
@@ -3575,13 +3608,14 @@ function qrSVG(text){
   return '';
 }
 function labelInner(d,opt){
+  const logo=logoData?`<img class="lbl-logo" src="${logoData}" alt="">`:'';
   const title=opt.title?`<div class="lbl-title">${esc(opt.title)}</div>`:'';
   let code='';
   if(opt.code==='qr'){ const svg=qrSVG(locURL(d.code)); code=svg?`<div class="lbl-qr">${svg}</div>`:`<div class="lbl-bc">${barcode39(d.code)}</div>`; }
   else if(opt.code==='c39'){ code=`<div class="lbl-bc">${barcode39(d.code)}</div>`; }
   const prod=(opt.prod&&d.occ&&d.prod)?`<div class="lbl-prod">${esc(d.prod)}</div>`:'';
   const levels=levelStrip(d.levels||1,d.L);
-  return `${title}<div class="lbl-code">${esc(d.code)}</div>${code}`
+  return `${logo}${title}<div class="lbl-code">${esc(d.code)}</div>${code}`
     +`<div class="lbl-meta">Raft ${esc(d.rack)} · Nivel ${d.L} · Palet ${d.pal}</div>${prod}${levels}`;
 }
 function labelOpts(){ return {
@@ -3609,6 +3643,7 @@ function printLabels(){
     *{margin:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
     .label{width:210mm;height:148.5mm;padding:10mm 36mm 10mm 14mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;position:relative;page-break-inside:avoid}
     .label:nth-child(2n){page-break-after:always}
+    .lbl-logo{max-height:20mm;max-width:80mm;object-fit:contain;margin-bottom:3mm}
     .lbl-title{font-size:9mm;font-weight:800;letter-spacing:.06em;color:#334155;margin-bottom:2mm}
     .lbl-code{font-size:24mm;font-weight:900;color:#0f172a;line-height:1;letter-spacing:.02em;word-break:break-all}
     .lbl-bc{margin:4mm 0 2mm}
@@ -4052,6 +4087,9 @@ function importExcel(file){
 $('btnSave').addEventListener('click', exportExcel);
 $('btnLoad').addEventListener('click', ()=>$('fileXlsx').click());
 $('fileXlsx').addEventListener('change', e=>{ if(e.target.files[0]) importExcel(e.target.files[0]); e.target.value=''; });
+$('btnLogo').addEventListener('click', ()=>$('fileLogo').click());
+$('fileLogo').addEventListener('change', e=>{ if(e.target.files[0]) loadLogoFile(e.target.files[0]); e.target.value=''; });
+$('btnLogoRemove').addEventListener('click', ()=>setLogo(''));
 
 // --- import config rafturi (Excel simplu: Nume, Nivele, Rand) ---
 function readRackCfg(file){
@@ -4125,6 +4163,7 @@ function applyState(st){
   const g=st.g||{}, setv=(id,v)=>{ if(v!==undefined&&v!==null&&v!=='') $(id).value=v; };
   setv('lpref',g.lpref);setv('ppref',g.ppref);setv('ldig',g.ldig);setv('pdig',g.pdig);
   setv('sep',g.sep);setv('base',g.base);setv('pdir',g.pdir);setv('cellmode',g.mode);setv('capacity',g.cap);setv('codeorder',g.order);
+  logoData=g.logo||''; applyLogo();
   $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k];
   const racks=(st.racks&&st.racks.length)?st.racks:[{name:'A01',levels:4,pallets:3},{name:'A02',levels:4,pallets:3}];
   racks.forEach(r=>{ const id=addRackRaw(r.name,r.levels,r.pallets); if(r.dims) dimStore[id]={...DEF,...r.dims}; });
@@ -4237,7 +4276,7 @@ initApp();
     window.__role=role; window.__isAdmin=(role==='admin'); window.__readonly=(role==='viewer');
     if(role==='viewer'){
       document.body.classList.add('readonly');
-      ['addRack','addProd','btnInv','btnInvClear','btnSyncSchema','btnReset','btnRackCfg','applyAll','btnLoad'].forEach(id=>{ const el=$(id); if(el) el.disabled=true; });
+      ['addRack','addProd','btnInv','btnInvClear','btnSyncSchema','btnReset','btnRackCfg','applyAll','btnLoad','btnLogo','btnLogoRemove'].forEach(id=>{ const el=$(id); if(el) el.disabled=true; });
       if(!$('roBanner')){ const b=document.createElement('div'); b.id='roBanner'; b.textContent='👁️ Cont de vizualizare — poți doar să vezi, nu să modifici.'; b.style.cssText='background:#fef9c3;color:#854d0e;font-size:13px;font-weight:600;padding:8px 14px;text-align:center'; const h=document.querySelector('header'); if(h&&h.parentNode) h.parentNode.insertBefore(b,h.nextSibling); }
     }
     const addCard=$('addUserCard'); if(addCard) addCard.style.display=(role==='admin')?'':'none';
