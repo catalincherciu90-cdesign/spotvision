@@ -272,6 +272,22 @@
 <div id="viewUsers" hidden>
 <div class="wrap">
   <div class="controls">
+    <div class="card" id="companyCard" style="display:none">
+      <h2>Datele firmei</h2>
+      <div class="field"><label>Nume firmă</label><input id="coName" maxlength="60" placeholder="ex. Depozit SRL"></div>
+      <div class="row">
+        <div class="field"><label>CUI / CIF</label><input id="coCui" maxlength="20" placeholder="ex. RO12345678"></div>
+        <div class="field"><label>Nr. reg. com.</label><input id="coRegcom" maxlength="30" placeholder="ex. J40/1234/2020"></div>
+      </div>
+      <div class="field"><label>Adresă</label><input id="coAdresa" maxlength="120" placeholder="stradă, nr."></div>
+      <div class="row">
+        <div class="field"><label>Oraș</label><input id="coOras" maxlength="60"></div>
+        <div class="field"><label>Telefon</label><input id="coTelefon" maxlength="30"></div>
+      </div>
+      <div class="field"><label>Email</label><input id="coEmail" maxlength="80"></div>
+      <button id="coSave" class="main">💾 Salvează datele firmei</button>
+      <div id="coStatus" class="status"></div>
+    </div>
     <div class="card" id="addUserCard">
       <h2>Adaugă utilizator</h2>
       <p class="hint" style="margin-top:0;margin-bottom:12px">Fiecare coleg intră cu id-ul și parola lui. Conturile sunt partajate — toți lucrează pe aceleași date.</p>
@@ -4362,6 +4378,7 @@ initApp();
       if(!$('roBanner')){ const b=document.createElement('div'); b.id='roBanner'; b.textContent='👁️ Cont de vizualizare — poți doar să vezi, nu să modifici.'; b.style.cssText='background:#fef9c3;color:#854d0e;font-size:13px;font-weight:600;padding:8px 14px;text-align:center'; const h=document.querySelector('header'); if(h&&h.parentNode) h.parentNode.insertBefore(b,h.nextSibling); }
     }
     const addCard=$('addUserCard'); if(addCard) addCard.style.display=(role==='admin')?'':'none';
+    const coCard=$('companyCard'); if(coCard) coCard.style.display=(role==='admin')?'':'none';
     const uh=$('usersHint'); if(uh&&role!=='admin') uh.textContent='Lista conturilor. Doar administratorii pot adăuga sau șterge utilizatori.';
   }
   async function initAuth(){
@@ -4394,7 +4411,26 @@ initApp();
   // ---- tab utilizatori ----
   const usersTab = document.querySelector('.tab[data-v="users"]');
   $('btnUsers').addEventListener('click', e=>{ e.preventDefault(); if(usersTab) usersTab.click(); });
-  if(usersTab) usersTab.addEventListener('click', ()=>{ $('usersErr').textContent=''; loadUsers(); });
+  if(usersTab) usersTab.addEventListener('click', ()=>{ $('usersErr').textContent=''; loadUsers(); loadCompany(); });
+
+  async function loadCompany(){
+    if(window.__role!=='admin') return;
+    try{
+      const c=await (await fetch('/api/company')).json(); const d=c.details||{};
+      $('coName').value=c.name||''; $('coCui').value=d.cui||''; $('coRegcom').value=d.regcom||'';
+      $('coAdresa').value=d.adresa||''; $('coOras').value=d.oras||''; $('coTelefon').value=d.telefon||''; $('coEmail').value=d.email||'';
+    }catch(e){}
+  }
+  $('coSave').addEventListener('click', async ()=>{
+    const body={ name:$('coName').value.trim(), details:{ cui:$('coCui').value.trim(), regcom:$('coRegcom').value.trim(), adresa:$('coAdresa').value.trim(), oras:$('coOras').value.trim(), telefon:$('coTelefon').value.trim(), email:$('coEmail').value.trim() } };
+    $('coStatus').textContent='Se salvează…';
+    try{
+      const r=await fetch('/api/company',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const d=await r.json().catch(()=>({}));
+      if(r.ok){ $('coStatus').textContent='✓ Salvat.'; const ub=$('authUser'); if(ub && d.name){ const parts=ub.textContent.split(' · '); if(parts.length>=2){ parts[2]=d.name; ub.textContent=parts.slice(0,3).join(' · '); } } window.__company=d; }
+      else $('coStatus').textContent=d.error||'Eroare.';
+    }catch(e){ $('coStatus').textContent='Conexiune eșuată.'; }
+  });
 
   function fmtSeen(now, ts){ if(!ts) return 'niciodată'; const m=Math.floor((now-ts)/60000); if(m<1) return 'chiar acum'; if(m<60) return 'acum '+m+' min'; const h=Math.floor(m/60); if(h<24) return 'acum '+h+' h'; return 'acum '+Math.floor(h/24)+' zile'; }
   async function loadUsers(){

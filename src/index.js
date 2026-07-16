@@ -205,6 +205,7 @@ let tenancyReady = false;
 async function ensureTenancy(env) {
   if (tenancyReady) return;
   try { await env.DB.prepare('CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL)').run(); } catch (e) {}
+  try { await env.DB.prepare('ALTER TABLE tenants ADD COLUMN details TEXT').run(); } catch (e) {}
   try { await env.DB.prepare('ALTER TABLE users ADD COLUMN tenant TEXT').run(); } catch (e) {}
   try { await env.DB.prepare("CREATE TABLE IF NOT EXISTS config_mt (tenant TEXT PRIMARY KEY, racks TEXT NOT NULL DEFAULT '[]', g TEXT NOT NULL DEFAULT '{}')").run(); } catch (e) {}
   try { await env.DB.prepare('CREATE TABLE IF NOT EXISTS inventory_mt (tenant TEXT NOT NULL, code TEXT NOT NULL, items TEXT NOT NULL, PRIMARY KEY (tenant, code))').run(); } catch (e) {}
@@ -228,6 +229,13 @@ async function getUserTenant(env, id) {
 async function tenantName(env, tid) {
   const r = await env.DB.prepare('SELECT name FROM tenants WHERE id = ?1').bind(tid).first();
   return r ? r.name : '';
+}
+const COMPANY_FIELDS = ['cui', 'regcom', 'adresa', 'oras', 'telefon', 'email'];
+async function getCompany(env, tid) {
+  const r = await env.DB.prepare('SELECT name, details FROM tenants WHERE id = ?1').bind(tid).first();
+  let details = {};
+  if (r && r.details) { try { const o = JSON.parse(r.details); if (o && typeof o === 'object') details = o; } catch (e) {} }
+  return { name: r ? r.name : '', details };
 }
 async function tenantUserCount(env, tid) {
   const r = await env.DB.prepare('SELECT COUNT(*) AS n FROM users WHERE tenant = ?1').bind(tid).first();
@@ -376,6 +384,22 @@ export default {
       await logAct(env, tid, session.sub, 'A șters contul „' + target + '”');
       const headers = target === session.sub ? { 'Set-Cookie': clearCookie() } : undefined;
       return json({ ok: true }, 200, headers);
+    }
+
+    // ---------- datele firmei ----------
+    if (p === '/api/company') {
+      if (!session) return json({ error: 'Neautentificat.' }, 401);
+      if (method === 'GET') { return json(await getCompany(env, tid)); }
+      if (method === 'POST' || method === 'PUT') {
+        if (myRole !== 'admin') return json({ error: 'Doar administratorii pot edita datele firmei.' }, 403);
+        const body = await readBody(req) || {};
+        const name = String(body.name || '').trim().slice(0, 60);
+        const d = {};
+        for (const k of COMPANY_FIELDS) d[k] = String((body.details && body.details[k]) || '').trim().slice(0, 120);
+        await env.DB.prepare('UPDATE tenants SET name = COALESCE(NULLIF(?1, \'\'), name), details = ?2 WHERE id = ?3').bind(name, JSON.stringify(d), tid).run();
+        await logAct(env, tid, session.sub, 'A actualizat datele firmei', 'platforma');
+        return json({ ok: true, ...(await getCompany(env, tid)) });
+      }
     }
 
     // ---------- prezenta (permisa si pentru viewer), izolata pe firma ----------
