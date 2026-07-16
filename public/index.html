@@ -215,6 +215,14 @@
   .pc-row .pc-pick input{width:auto;margin:0}
   .pc-row .pc-info{grid-column:1;font-size:12px;color:var(--muted);font-weight:500}
   .pc-row .pc-qty{grid-row:1 / span 2;grid-column:2;width:74px;text-align:center;padding:8px}
+  /* lista de comenzi (cos) */
+  #orderList{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+  .order-item{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;cursor:pointer;background:#fff}
+  .order-item.active{border-color:var(--accent);background:#eff6ff}
+  .order-item .oi-name{flex:1;min-width:0;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .order-item .oi-count{font-size:12px;font-weight:600;color:var(--muted);background:#f1f5f9;border-radius:20px;padding:2px 9px}
+  .order-item .oi-del{flex:0 0 auto;border:0;background:none;color:#b91c1c;cursor:pointer;font-size:15px;line-height:1;padding:2px 4px}
+  .order-item.active .oi-count{background:#dbeafe;color:var(--accent-d)}
 </style>
 </head>
 <body>
@@ -527,17 +535,24 @@
 <div class="wrap">
   <div class="controls">
     <div class="card">
-      <h2>Comandă de cules</h2>
-      <p class="hint" style="margin-top:0">Adaugă produsele și cantitățile. Aplicația îți spune din ce locații să iei, în ordine FIFO (cel mai vechi primul).</p>
+      <h2>Comenzi</h2>
+      <div id="orderList"></div>
+      <button class="addr" id="orderAdd">➕ Comandă nouă</button>
+    </div>
+    <div class="card">
+      <h2>Coșul comenzii</h2>
+      <div class="field" style="margin-bottom:10px"><label>Nume comandă</label><input id="orderName" placeholder="ex. Comanda client X" maxlength="60"></div>
+      <p class="hint" style="margin-top:0">Adaugă produsele și cantitățile în coș. Aplicația îți spune din ce locații să iei, în ordine FIFO (cel mai vechi primul).</p>
       <div id="pickRows"></div>
       <button class="addr" id="pickAdd">➕ Adaugă produs</button>
       <button class="main alt" id="pickScan" style="margin-top:8px">📷 Scanează locația și alege produse</button>
-      <button class="main" id="pickGen" style="margin-top:12px">Generează lista de cules</button>
-      <button class="main ghost" id="pickClear" style="margin-top:6px">Golește</button>
+      <button class="main ghost" id="pickClear" style="margin-top:8px">Golește coșul</button>
     </div>
     <div class="card">
-      <h2>Acțiuni</h2>
-      <button class="main alt" id="pickPrint">🖨️ Printează lista</button>
+      <h2>Generează & acțiuni</h2>
+      <label class="perlvl-toggle"><input type="checkbox" id="pickAll"> Include toate comenzile în listă</label>
+      <button class="main" id="pickGen" style="margin-top:10px">Generează lista de cules</button>
+      <button class="main alt" id="pickPrint" style="margin-top:8px">🖨️ Printează lista</button>
       <button class="main" id="pickConfirm" style="margin-top:8px;background:#16a34a">✓ Confirmă ridicarea (scade din stoc)</button>
       <p class="hint" style="margin-top:8px">La confirmare, cantitățile culese se scad din inventar. Fără confirmare, stocul rămâne neatins.</p>
       <div class="status" id="pickStatus"></div>
@@ -3669,6 +3684,33 @@ function closeScanner(){
 
 // ---------- PICKING (culegere comanda, FIFO) ----------
 let lastPicks=null;   // ultima lista generata (pentru confirmare/printare)
+// --- coș / comenzi multiple ---
+let orders=[], activeId=null, pickInited=false, oidc=0;
+const PICK_KEY='pickOrders_v1';
+function oid(){ return 'o'+(++oidc)+Math.random().toString(36).slice(2,5); }
+function activeOrder(){ return orders.find(o=>o.id===activeId)||null; }
+function newOrderObj(name){ return {id:oid(), name:name||('Comanda '+(orders.length+1)), items:[]}; }
+function savePickOrders(){ try{ localStorage.setItem(PICK_KEY, JSON.stringify({orders, activeId})); }catch(_){}}
+function loadPickOrders(){ try{ const s=JSON.parse(localStorage.getItem(PICK_KEY)||'null'); if(s&&Array.isArray(s.orders)&&s.orders.length){ orders=s.orders; activeId=s.activeId||orders[0].id; return true; } }catch(_){} return false; }
+function rowsToItems(){ const items=[]; $('pickRows').querySelectorAll('.pickrow').forEach(r=>{ const prod=r.querySelector('.pk-prod').value.trim(); const qty=+r.querySelector('.pk-qty').value||0; if(prod) items.push({prod, qty:qty||''}); }); return items; }
+function itemsToRows(items){ const box=$('pickRows'); box.innerHTML=''; const list=(items&&items.length)?items:[{prod:'',qty:''}]; list.forEach(it=>addPickRow(it.prod, it.qty)); if(!box.querySelector('.pickrow')) addPickRow('',''); }
+function saveActiveFromUI(){ const o=activeOrder(); if(!o) return; o.items=rowsToItems(); const nm=$('orderName').value.trim(); if(nm) o.name=nm; savePickOrders(); renderOrderList(); }
+function renderOrderList(){ const box=$('orderList'); if(!box) return;
+  box.innerHTML=orders.map(o=>{ const cnt=(o.items||[]).filter(it=>it.prod&&(+it.qty>0)).length;
+    return `<div class="order-item${o.id===activeId?' active':''}" data-id="${o.id}"><span class="oi-name">${esc(o.name)}</span><span class="oi-count">${cnt}</span>${orders.length>1?'<button class="oi-del" title="Șterge comanda" type="button">🗑</button>':''}</div>`; }).join('');
+}
+function setActiveOrder(id){ saveActiveFromUI(); activeId=id; const o=activeOrder(); if(!o) return; $('orderName').value=o.name; itemsToRows(o.items); renderOrderList(); savePickOrders(); }
+function addOrder(){ saveActiveFromUI(); const o=newOrderObj(); orders.push(o); activeId=o.id; $('orderName').value=o.name; itemsToRows(o.items); renderOrderList(); savePickOrders(); }
+function deleteOrder(id){ if(orders.length<=1) return; const wasActive=(id===activeId); orders=orders.filter(o=>o.id!==id); if(wasActive){ activeId=orders[0].id; const o=activeOrder(); $('orderName').value=o.name; itemsToRows(o.items); } renderOrderList(); savePickOrders(); }
+// aduna produsele din comanda activa (sau din toate comenzile), unind duplicatele
+function collectOrderItems(){
+  saveActiveFromUI();
+  const all=$('pickAll')&&$('pickAll').checked;
+  const src = all ? orders : [activeOrder()].filter(Boolean);
+  const map=new Map();
+  src.forEach(o=>(o.items||[]).forEach(it=>{ const term=String(it.prod||'').trim(); const qty=+it.qty||0; if(!term||qty<=0) return; const k=term.toLowerCase(); map.set(k,{term, qty:(map.get(k)?.qty||0)+qty}); }));
+  return [...map.values()];
+}
 function pickProdOptions(){
   const set=new Set();
   Object.keys(inventory).forEach(code=>inventory[code].forEach(p=>{ if(p.produs) set.add(String(p.produs)); if(p.cod) set.add(String(p.cod)); }));
@@ -3712,12 +3754,17 @@ function applyPickChooser(){
     if(prod&&qty>0){ addPickItem(prod,qty); added++; }
   });
   closePickChooser();
-  if(added) $('pickStatus').textContent=added+' produs(e) adăugat(e) din locația scanată.';
+  if(added){ saveActiveFromUI(); $('pickStatus').textContent=added+' produs(e) adăugat(e) din locația scanată.'; }
 }
 function closePickChooser(){ $('pickChooser').style.display='none'; }
 function initPick(){
   pickProdOptions();
-  if(!$('pickRows').querySelector('.pickrow')) addPickRow('','');
+  if(!pickInited){
+    if(!loadPickOrders()){ orders=[newOrderObj('Comanda 1')]; activeId=orders[0].id; }
+    const o=activeOrder()||orders[0]; activeId=o.id;
+    $('orderName').value=o.name; itemsToRows(o.items); renderOrderList();
+    pickInited=true;
+  }
   renderPicking(lastPicks);
 }
 // citeste comanda din randuri (produse cu cantitati), unind duplicatele
@@ -3769,11 +3816,13 @@ function renderPicking(res){
   box.innerHTML=h;
 }
 function genPicking(){
-  const order=readOrder();
+  const order=collectOrderItems();
   if(!order.length){ renderPicking(null); lastPicks=null; $('pickStatus').textContent='Adaugă cel puțin un produs cu cantitate.'; return; }
   const res=buildPicking(order); lastPicks=res; renderPicking(res);
   const tot=res.picks.reduce((a,p)=>a+p.take,0);
-  $('pickStatus').textContent=`${res.picks.length} locații de vizitat · ${tot} buc de cules`+(res.shorts.length?` · ${res.shorts.length} produs(e) cu lipsă`:'');
+  const all=$('pickAll')&&$('pickAll').checked;
+  const scope=all?`${orders.length} comenzi`:('comanda „'+((activeOrder()&&activeOrder().name)||'')+'”');
+  $('pickStatus').textContent=`${scope}: ${res.picks.length} locații · ${tot} buc de cules`+(res.shorts.length?` · ${res.shorts.length} cu lipsă`:'');
 }
 // scade din stoc cantitatile culese (la confirmare)
 function confirmPicking(){
@@ -3806,10 +3855,14 @@ function printPicking(){
   const w=window.open('','_blank'); if(!w){ alert('Permite ferestrele pop-up pentru a printa.'); return; }
   w.document.open(); w.document.write(html); w.document.close();
 }
-$('pickAdd').addEventListener('click', ()=>addPickRow('',''));
-$('pickRows').addEventListener('click', e=>{ if(e.target.classList.contains('pk-rm')){ const rows=$('pickRows').querySelectorAll('.pickrow'); if(rows.length>1) e.target.closest('.pickrow').remove(); else { e.target.closest('.pickrow').querySelector('.pk-prod').value=''; e.target.closest('.pickrow').querySelector('.pk-qty').value=''; } } });
+$('pickAdd').addEventListener('click', ()=>{ addPickRow('',''); });
+$('pickRows').addEventListener('click', e=>{ if(e.target.classList.contains('pk-rm')){ const rows=$('pickRows').querySelectorAll('.pickrow'); if(rows.length>1) e.target.closest('.pickrow').remove(); else { e.target.closest('.pickrow').querySelector('.pk-prod').value=''; e.target.closest('.pickrow').querySelector('.pk-qty').value=''; } saveActiveFromUI(); } });
+$('pickRows').addEventListener('input', saveActiveFromUI);
+$('orderName').addEventListener('input', saveActiveFromUI);
+$('orderAdd').addEventListener('click', addOrder);
+$('orderList').addEventListener('click', e=>{ const del=e.target.closest('.oi-del'); const item=e.target.closest('.order-item'); if(!item) return; const id=item.dataset.id; if(del){ e.stopPropagation(); if(confirm('Ștergi această comandă?')) deleteOrder(id); return; } setActiveOrder(id); });
 $('pickGen').addEventListener('click', genPicking);
-$('pickClear').addEventListener('click', ()=>{ $('pickRows').innerHTML=''; addPickRow('',''); lastPicks=null; renderPicking(null); $('pickStatus').textContent=''; });
+$('pickClear').addEventListener('click', ()=>{ const o=activeOrder(); if(o) o.items=[]; itemsToRows([]); savePickOrders(); renderOrderList(); lastPicks=null; renderPicking(null); $('pickStatus').textContent=''; });
 $('pickPrint').addEventListener('click', printPicking);
 $('pickConfirm').addEventListener('click', confirmPicking);
 $('pickScan').addEventListener('click', ()=>openScanner('pick'));
