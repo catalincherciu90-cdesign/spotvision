@@ -20,6 +20,8 @@
   .tab.active{background:var(--accent);color:#fff;box-shadow:0 2px 7px rgba(74,143,36,.35)}
   .tab.active:hover{background:var(--accent-d);color:#fff}
   .badge{display:inline-block;margin:8px 0 12px;font-size:12px;font-weight:600;padding:3px 11px;border-radius:20px}
+  /* status conexiune: sub zona de user, in coltul din dreapta sus */
+  #syncBadge{position:absolute;top:38px;right:14px;margin:0;z-index:5}
   .badge.on{background:#dcfce7;color:#15803d}
   .badge.off{background:#fee2e2;color:#b91c1c}
   .badge.local{background:#e5e7eb;color:#374151}
@@ -143,6 +145,7 @@
     .tab{padding:9px 12px;font-size:14px}
     /* bara cont: in flux normal, nu absoluta (nu se mai suprapune peste titlu) */
     #authBar{position:static!important;justify-content:flex-end;margin:2px 0 8px}
+    #syncBadge{position:static!important;margin:0 0 10px}
     .wrap{padding:12px;gap:14px}
     .card{padding:14px;margin-bottom:14px}
     .stage{padding:12px}
