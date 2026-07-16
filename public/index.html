@@ -209,6 +209,12 @@
   #pickResult .pk-done{color:#16a34a;font-weight:700;margin-top:10px}
   #pickResult .pk-empty{color:var(--muted)}
   @media(max-width:640px){ #pickResult th,#pickResult td{padding:7px 6px;font-size:13px} }
+  /* alegere produse din locatia scanata */
+  .pc-row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+  .pc-row .pc-pick{display:flex;align-items:center;gap:8px;font-weight:700;color:#0f172a;cursor:pointer}
+  .pc-row .pc-pick input{width:auto;margin:0}
+  .pc-row .pc-info{grid-column:1;font-size:12px;color:var(--muted);font-weight:500}
+  .pc-row .pc-qty{grid-row:1 / span 2;grid-column:2;width:74px;text-align:center;padding:8px}
 </style>
 </head>
 <body>
@@ -525,6 +531,7 @@
       <p class="hint" style="margin-top:0">Adaugă produsele și cantitățile. Aplicația îți spune din ce locații să iei, în ordine FIFO (cel mai vechi primul).</p>
       <div id="pickRows"></div>
       <button class="addr" id="pickAdd">➕ Adaugă produs</button>
+      <button class="main alt" id="pickScan" style="margin-top:8px">📷 Scanează locația și alege produse</button>
       <button class="main" id="pickGen" style="margin-top:12px">Generează lista de cules</button>
       <button class="main ghost" id="pickClear" style="margin-top:6px">Golește</button>
     </div>
@@ -544,6 +551,19 @@
 </div>
 
 <datalist id="pickProdList"></datalist>
+
+<!-- Alegere produse dintr-o locatie scanata (pentru Picking) -->
+<div id="pickChooser" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:1001;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:14px;max-width:460px;width:100%;max-height:82vh;overflow:auto;padding:18px">
+    <h3 id="pickChooserTitle" style="margin:0 0 4px;font-size:17px">Locație</h3>
+    <p class="hint" style="margin:0 0 12px">Bifează produsele și cantitățile pe care le adaugi în comandă.</p>
+    <div id="pickChooserBody"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="main" id="pickChooserAdd" style="flex:1">Adaugă în comandă</button>
+      <button class="main ghost" id="pickChooserClose" style="flex:0 0 auto;width:auto;padding:11px 16px">Anulează</button>
+    </div>
+  </div>
+</div>
 
 <!-- Scanner cod (QR / bare) cu camera telefonului -->
 <div id="scanModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.92);z-index:1000;flex-direction:column;align-items:center;justify-content:center;padding:16px">
@@ -3592,13 +3612,16 @@ function printLabels(){
   const w=window.open('','_blank'); if(!w){ alert('Permite ferestrele pop-up pentru a printa etichetele.'); return; }
   w.document.open(); w.document.write(html); w.document.close();
 }
+// extrage codul locatiei dintr-un rezultat de scanare (URL cu ?loc=CODE sau cod simplu)
+function parseScanCode(raw){
+  if(!raw) return '';
+  let code=String(raw).trim();
+  const m=code.match(/[?&]loc=([^&#]+)/i); if(m){ try{ code=decodeURIComponent(m[1]); }catch(_){ code=m[1]; } }
+  return code.trim().toUpperCase();
+}
 // deschide o locatie (din scanare sau din link ?loc=): arata stocul + produsele
 function goToLoc(raw){
-  if(!raw) return false;
-  let code=String(raw).trim();
-  // daca s-a scanat un URL cu ?loc=CODE, extrage codul
-  const m=code.match(/[?&]loc=([^&#]+)/i); if(m){ try{ code=decodeURIComponent(m[1]); }catch(_){ code=m[1]; } }
-  code=code.trim().toUpperCase(); if(!code) return false;
+  const code=parseScanCode(raw); if(!code) return false;
   // treci pe tab-ul Schemă și arată panoul locației
   const tab=document.querySelector('.tab[data-v="schema"]'); if(tab) tab.click();
   if(typeof showLoc==='function') showLoc(code);
@@ -3606,8 +3629,9 @@ function goToLoc(raw){
   return true;
 }
 // ---------- SCANNER cu camera (QR / cod de bare) ----------
-let scanStream=null, scanRAF=0, scanDetector=null;
-function openScanner(){
+let scanStream=null, scanRAF=0, scanDetector=null, scanMode='nav';
+function openScanner(mode){
+  scanMode=mode||'nav';
   const modal=$('scanModal'), video=$('scanVideo'), msg=$('scanMsg');
   modal.style.display='flex'; msg.textContent='Se pornește camera…';
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ msg.textContent='Camera nu e disponibilă pe acest dispozitiv/browser.'; return; }
@@ -3630,7 +3654,7 @@ function scanLoop(){
         else if(typeof jsQR==='function'){ const w=video.videoWidth,h=video.videoHeight; if(w&&h){ cv.width=w;cv.height=h; const cx=cv.getContext('2d'); cx.drawImage(video,0,0,w,h); const img=cx.getImageData(0,0,w,h); const r=jsQR(img.data,w,h); if(r&&r.data) found=r.data; } }
         else { $('scanMsg').textContent='Scanarea în aplicație nu e suportată de acest browser. Scanează codul QR cu aplicația de cameră a telefonului — se deschide direct locația.'; }
       }catch(_){}
-      if(found){ closeScanner(); goToLoc(found); return; }
+      if(found){ const m=scanMode; closeScanner(); if(m==='pick') pickScanResult(found); else goToLoc(found); return; }
     }
     scanRAF=requestAnimationFrame(tick);
   };
@@ -3654,6 +3678,43 @@ function pickRowHTML(prod,qty){
   return `<div class="pickrow"><input class="pk-prod" list="pickProdList" placeholder="Produs sau cod SKU" value="${esc(prod||'')}"><input class="pk-qty" type="number" min="1" placeholder="Cant." value="${qty||''}"><button class="pk-rm" title="Șterge rândul" type="button">✕</button></div>`;
 }
 function addPickRow(prod,qty){ const box=$('pickRows'); box.insertAdjacentHTML('beforeend', pickRowHTML(prod,qty)); }
+// adauga un produs in comanda: completeaza primul rand gol, altfel adauga unul nou (sau aduna la un rand existent)
+function addPickItem(prod,qty){
+  const rows=[...$('pickRows').querySelectorAll('.pickrow')];
+  const same=rows.find(r=>r.querySelector('.pk-prod').value.trim().toLowerCase()===String(prod).toLowerCase());
+  if(same){ const q=same.querySelector('.pk-qty'); q.value=(+q.value||0)+(+qty||0); return; }
+  const empty=rows.find(r=>!r.querySelector('.pk-prod').value.trim());
+  if(empty){ empty.querySelector('.pk-prod').value=prod; empty.querySelector('.pk-qty').value=qty||''; }
+  else addPickRow(prod,qty);
+}
+// dupa scanarea unei etichete in tab-ul Picking: arata produsele din acea locatie ca sa le alegi
+function pickScanResult(raw){
+  const code=parseScanCode(raw); if(!code){ return; }
+  const inv=invByCode(code)||[];
+  const body=$('pickChooserBody'), ttl=$('pickChooserTitle');
+  ttl.textContent='Locația '+code;
+  if(!inv.length){ body.innerHTML='<p class="pk-empty" style="margin:0">Locație liberă — niciun produs aici.</p>'; }
+  else {
+    const list=inv.slice().sort(byFifo);
+    body.innerHTML=list.map((p,i)=>`<div class="pc-row" data-i="${i}">
+      <label class="pc-pick"><input type="checkbox" class="pc-chk" checked> <span class="pc-name">${esc(p.produs)}</span></label>
+      <span class="pc-info">${esc(p.cod||'')}${p.data?' · '+esc(p.data):''} · disp. ${p.cant}</span>
+      <input class="pc-qty" type="number" min="1" value="${p.cant}" data-prod="${esc(p.produs)}">
+    </div>`).join('');
+  }
+  $('pickChooser').style.display='flex';
+}
+function applyPickChooser(){
+  const rows=[...document.querySelectorAll('#pickChooserBody .pc-row')];
+  let added=0;
+  rows.forEach(r=>{ const chk=r.querySelector('.pc-chk'); if(!chk||!chk.checked) return;
+    const prod=r.querySelector('.pc-qty').dataset.prod, qty=+r.querySelector('.pc-qty').value||0;
+    if(prod&&qty>0){ addPickItem(prod,qty); added++; }
+  });
+  closePickChooser();
+  if(added) $('pickStatus').textContent=added+' produs(e) adăugat(e) din locația scanată.';
+}
+function closePickChooser(){ $('pickChooser').style.display='none'; }
 function initPick(){
   pickProdOptions();
   if(!$('pickRows').querySelector('.pickrow')) addPickRow('','');
@@ -3751,6 +3812,9 @@ $('pickGen').addEventListener('click', genPicking);
 $('pickClear').addEventListener('click', ()=>{ $('pickRows').innerHTML=''; addPickRow('',''); lastPicks=null; renderPicking(null); $('pickStatus').textContent=''; });
 $('pickPrint').addEventListener('click', printPicking);
 $('pickConfirm').addEventListener('click', confirmPicking);
+$('pickScan').addEventListener('click', ()=>openScanner('pick'));
+$('pickChooserAdd').addEventListener('click', applyPickChooser);
+$('pickChooserClose').addEventListener('click', closePickChooser);
 let schemaFilterInit=false;
 function syncSchemaFilter(){
   const sel=$('schemaRackFilter'); if(!sel) return; const prev=sel.value, rs=readRacks();
