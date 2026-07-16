@@ -669,6 +669,9 @@
     </div>
   </div>
   <div>
+    <p class="total" style="margin-bottom:6px">Cereri de înregistrare <span style="font-size:13px;font-weight:600;color:#b45309;background:#fef3c7;padding:2px 10px;border-radius:20px;vertical-align:middle"><span id="mReqCount">0</span></span></p>
+    <p class="sub noprint">Firme care așteaptă aprobarea ta. La aprobare se creează firma + contul de admin.</p>
+    <div class="stage" style="margin-bottom:18px"><div id="mReqList"></div></div>
     <p class="total" style="margin-bottom:6px">Firme <span style="font-size:13px;font-weight:600;color:#16a34a;background:#dcfce7;padding:2px 10px;border-radius:20px;vertical-align:middle"><span id="mCount">0</span></span></p>
     <p class="sub noprint">Toate firmele din platformă. Ștergerea unei firme îi șterge toate datele.</p>
     <div class="stage"><div id="mList"></div></div>
@@ -4048,7 +4051,28 @@ $('logTabs').addEventListener('click', e=>{ const b=e.target.closest('.logtab');
 
 // ---------- MASTER: administrare platforma (toate firmele) ----------
 function fmtDMY(ts){ try{ const d=new Date(+ts); const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()}`; }catch(_){ return ''; } }
+async function renderRequests(){
+  const box=$('mReqList'); if(!box) return;
+  box.innerHTML='<p class="log-empty">Se încarcă…</p>';
+  try{
+    const d=await (await fetch('/api/master/requests')).json();
+    const reqs=d.requests||[]; const cc=$('mReqCount'); if(cc) cc.textContent=reqs.length;
+    if(!reqs.length){ box.innerHTML='<p class="log-empty">Nicio cerere în așteptare.</p>'; return; }
+    box.innerHTML='';
+    reqs.forEach(r=>{
+      const el=document.createElement('div'); el.className='firm'; el.style.borderColor='#fcd34d'; el.style.background='#fffbeb';
+      el.innerHTML='<div class="f-main"><div class="f-name">'+esc(r.company)+'</div><div class="f-meta">admin: <b>'+esc(r.admin_id)+'</b>'+(r.email?(' · '+esc(r.email)):'')+' · cerută '+fmtDMY(r.created_at)+'</div></div>';
+      const act=document.createElement('div'); act.className='f-act';
+      const ap=document.createElement('a'); ap.textContent='✓ aprobă'; ap.style.color='#16a34a'; ap.style.fontWeight='700';
+      ap.addEventListener('click', async ()=>{ if(!confirm('Aprobi și creezi firma „'+r.company+'” (admin: '+r.admin_id+')?')) return; const rr=await fetch('/api/master/requests/'+r.id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'approve'})}); if(rr.ok){ renderRequests(); renderMaster(); } else { const rd=await rr.json().catch(()=>({})); alert(rd.error||'Eroare.'); renderRequests(); } });
+      const rj=document.createElement('a'); rj.textContent='respinge'; rj.style.color='#dc2626';
+      rj.addEventListener('click', async ()=>{ const note=prompt('Motivul respingerii (opțional):','')||''; const rr=await fetch('/api/master/requests/'+r.id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'reject',note})}); if(rr.ok) renderRequests(); });
+      act.appendChild(ap); act.appendChild(rj); el.appendChild(act); box.appendChild(el);
+    });
+  }catch(e){ box.innerHTML='<p class="log-empty">Nu am putut încărca cererile.</p>'; }
+}
 async function renderMaster(){
+  renderRequests();
   const box=$('mList'); if(!box) return;
   box.innerHTML='<p class="log-empty">Se încarcă…</p>';
   try{

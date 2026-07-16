@@ -52,6 +52,20 @@ CREATE TABLE IF NOT EXISTS presence_mt (
   PRIMARY KEY (tenant, user)
 );
 
+-- Cereri de inregistrare firma noua, aprobate de master.
+CREATE TABLE IF NOT EXISTS signup_requests (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  company    TEXT NOT NULL,
+  admin_id   TEXT NOT NULL,
+  pass_hash  TEXT NOT NULL,
+  email      TEXT,
+  status     TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'approved' | 'rejected'
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER,
+  decided_by TEXT,
+  note       TEXT
+);
+
 -- Config intern (ex: secretul de semnare a sesiunilor, auto-generat).
 CREATE TABLE IF NOT EXISTS meta (
   k TEXT PRIMARY KEY,

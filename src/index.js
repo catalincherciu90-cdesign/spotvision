@@ -214,6 +214,7 @@ async function ensureTenancy(env) {
   try { await env.DB.prepare("CREATE TABLE IF NOT EXISTS config_mt (tenant TEXT PRIMARY KEY, racks TEXT NOT NULL DEFAULT '[]', g TEXT NOT NULL DEFAULT '{}')").run(); } catch (e) {}
   try { await env.DB.prepare('CREATE TABLE IF NOT EXISTS inventory_mt (tenant TEXT NOT NULL, code TEXT NOT NULL, items TEXT NOT NULL, PRIMARY KEY (tenant, code))').run(); } catch (e) {}
   try { await env.DB.prepare('CREATE TABLE IF NOT EXISTS presence_mt (tenant TEXT NOT NULL, user TEXT NOT NULL, last_seen INTEGER NOT NULL, PRIMARY KEY (tenant, user))').run(); } catch (e) {}
+  try { await env.DB.prepare("CREATE TABLE IF NOT EXISTS signup_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, admin_id TEXT NOT NULL, pass_hash TEXT NOT NULL, email TEXT, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, decided_at INTEGER, decided_by TEXT, note TEXT)").run(); } catch (e) {}
   // migrare o singura data: datele vechi (single-tenant) -> firma 'default'
   try {
     const orphan = await env.DB.prepare('SELECT COUNT(*) AS n FROM users WHERE tenant IS NULL').first();
@@ -285,20 +286,32 @@ export default {
       return json({ setup, authenticated: !!session, id: session ? session.sub : null, role, tabs, tenant: tid, tenantName: tname, masterExists, canClaimMaster: !!session && role === 'admin' && !masterExists });
     }
 
-    // ---------- inregistrare firma noua (public): creeaza gestiune + admin ----------
+    // ---------- inregistrare firma noua (public) ----------
+    // Daca exista deja un master: se creeaza o CERERE, aprobata ulterior de master.
+    // Inainte de a exista un master (bootstrap): se creeaza direct firma + admin + login.
     if (p === '/api/signup' && method === 'POST') {
       if (tooMany(`signup:${ip}`, 8, 10 * 60000)) return json({ error: 'Prea multe încercări. Revino în câteva minute.' }, 429);
-      const { company, id, password } = await readBody(req);
+      const { company, id, password, email } = await readBody(req);
       const uid = String(id || '').trim();
       const cname = String(company || '').trim();
+      const mail = String(email || '').trim().slice(0, 120);
       if (!cname) return json({ error: 'Completează numele firmei.' }, 400);
       if (!/^[a-zA-Z0-9._-]{2,40}$/.test(uid)) return json({ error: 'Id-ul contului: 2-40 caractere (litere, cifre, . _ -).' }, 400);
       if (String(password || '').length < 6) return json({ error: 'Parola: minim 6 caractere.' }, 400);
-      const exists = await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(uid).first();
-      if (exists) return json({ error: 'Acest id de cont e deja folosit. Alege altul.' }, 409);
+      if (await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(uid).first()) return json({ error: 'Acest id de cont e deja folosit. Alege altul.' }, 409);
+      const hash = await hashPassword(String(password));
+
+      if ((await masterCount(env)) > 0) {
+        // deja e o cerere in asteptare pentru acest id?
+        const pend = await env.DB.prepare("SELECT id FROM signup_requests WHERE admin_id = ?1 AND status = 'pending'").bind(uid).first();
+        if (pend) return json({ error: 'Există deja o cerere în așteptare pentru acest id.' }, 409);
+        await env.DB.prepare('INSERT INTO signup_requests (company, admin_id, pass_hash, email, status, created_at) VALUES (?1, ?2, ?3, ?4, \'pending\', ?5)').bind(cname.slice(0, 60), uid, hash, mail, Date.now()).run();
+        return json({ pending: true });
+      }
+
+      // bootstrap: prima firma / inainte de master -> creare directa + login
       const tid = 't_' + toHex(crypto.getRandomValues(new Uint8Array(8)));
       await env.DB.prepare('INSERT INTO tenants (id, name, created_at) VALUES (?1, ?2, ?3)').bind(tid, cname.slice(0, 60), Date.now()).run();
-      const hash = await hashPassword(String(password));
       await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role, tenant) VALUES (?1, ?2, ?3, ?4, ?5)').bind(uid, hash, Date.now(), 'admin', tid).run();
       await env.DB.prepare("INSERT OR IGNORE INTO config_mt (tenant, racks, g) VALUES (?1, '[]', '{}')").bind(tid).run();
       await logAct(env, tid, uid, 'A creat firma „' + cname + '”', 'platforma');
@@ -445,6 +458,38 @@ export default {
         await env.DB.prepare("INSERT OR IGNORE INTO config_mt (tenant, racks, g) VALUES (?1, '[]', '{}')").bind(ntid).run();
         await logAct(env, ntid, session.sub, 'Master a creat firma „' + cname + '”', 'platforma');
         return json({ ok: true, id: ntid });
+      }
+      // cereri de inregistrare firma
+      if (p === '/api/master/requests' && method === 'GET') {
+        const rows = (await env.DB.prepare("SELECT id, company, admin_id, email, status, created_at FROM signup_requests WHERE status = 'pending' ORDER BY created_at").all()).results || [];
+        return json({ requests: rows });
+      }
+      const mReq = p.match(/^\/api\/master\/requests\/(\d+)$/);
+      if (mReq && method === 'POST') {
+        const rid = parseInt(mReq[1], 10);
+        const body = await readBody(req) || {};
+        const action = body.action;
+        const r = await env.DB.prepare('SELECT * FROM signup_requests WHERE id = ?1').bind(rid).first();
+        if (!r) return json({ error: 'Cerere inexistentă.' }, 404);
+        if (r.status !== 'pending') return json({ error: 'Cererea a fost deja procesată.' }, 409);
+        if (action === 'approve') {
+          if (await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(r.admin_id).first()) {
+            await env.DB.prepare("UPDATE signup_requests SET status='rejected', decided_at=?1, decided_by=?2, note='id ocupat' WHERE id=?3").bind(Date.now(), session.sub, rid).run();
+            return json({ error: 'Id-ul de admin e deja folosit acum. Cererea a fost respinsă.' }, 409);
+          }
+          const ntid = 't_' + toHex(crypto.getRandomValues(new Uint8Array(8)));
+          await env.DB.prepare('INSERT INTO tenants (id, name, created_at) VALUES (?1, ?2, ?3)').bind(ntid, String(r.company).slice(0, 60), Date.now()).run();
+          await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role, tenant) VALUES (?1, ?2, ?3, ?4, ?5)').bind(r.admin_id, r.pass_hash, Date.now(), 'admin', ntid).run();
+          await env.DB.prepare("INSERT OR IGNORE INTO config_mt (tenant, racks, g) VALUES (?1, '[]', '{}')").bind(ntid).run();
+          await env.DB.prepare("UPDATE signup_requests SET status='approved', decided_at=?1, decided_by=?2 WHERE id=?3").bind(Date.now(), session.sub, rid).run();
+          await logAct(env, ntid, session.sub, 'Master a aprobat firma „' + r.company + '”', 'platforma');
+          return json({ ok: true });
+        }
+        if (action === 'reject') {
+          await env.DB.prepare("UPDATE signup_requests SET status='rejected', decided_at=?1, decided_by=?2, note=?3 WHERE id=?4").bind(Date.now(), session.sub, String(body.note || '').slice(0, 200), rid).run();
+          return json({ ok: true });
+        }
+        return json({ error: 'Acțiune invalidă.' }, 400);
       }
       const mT = p.match(/^\/api\/master\/tenants\/(.+)$/);
       if (mT) {
@@ -595,6 +640,8 @@ function loginPage(setup) {
   <div id="companyWrap" class="hidden">
     <label>Numele firmei</label>
     <input id="company" autocomplete="organization" placeholder="ex. Depozit SRL">
+    <label>Email de contact (opțional)</label>
+    <input id="email" type="email" autocomplete="email" placeholder="ca să te putem anunța">
   </div>
   <label>Id (utilizator)</label>
   <input id="uid" autocomplete="username" required>
@@ -602,6 +649,7 @@ function loginPage(setup) {
   <input id="pwd" type="password" autocomplete="current-password" required>
   <button id="btn" type="submit"></button>
   <div class="err" id="err"></div>
+  <div class="ok" id="ok" style="margin-top:14px;color:#86efac;font-size:14px"></div>
   <div class="toggle" id="toggle"></div>
 </form>
 <script>
@@ -609,14 +657,15 @@ function loginPage(setup) {
   let mode = FORCE_SIGNUP ? 'signup' : 'login';
   const f=document.getElementById('f'), err=document.getElementById('err'), btn=document.getElementById('btn');
   const companyWrap=document.getElementById('companyWrap'), ttl=document.getElementById('ttl'), sub=document.getElementById('sub'), toggle=document.getElementById('toggle');
+  const okEl=document.getElementById('ok');
   function render(){
-    err.textContent='';
+    err.textContent=''; okEl.textContent='';
     if(mode==='signup'){
-      ttl.textContent='Creează o firmă nouă';
-      sub.textContent='Firma ta primește o bază de date proprie, separată de celelalte.';
+      ttl.textContent='Solicită înregistrarea firmei';
+      sub.textContent='Trimiți o cerere; după ce administratorul platformei o aprobă, poți intra cu contul ales.';
       companyWrap.classList.remove('hidden');
       document.getElementById('pwd').setAttribute('autocomplete','new-password');
-      btn.textContent='Creează firma';
+      btn.textContent='Trimite cererea';
       toggle.innerHTML = FORCE_SIGNUP ? '' : 'Ai deja cont? <a id="tg">Autentifică-te</a>';
     } else {
       ttl.textContent='Autentificare';
@@ -624,20 +673,21 @@ function loginPage(setup) {
       companyWrap.classList.add('hidden');
       document.getElementById('pwd').setAttribute('autocomplete','current-password');
       btn.textContent='Intră';
-      toggle.innerHTML = 'Firmă nouă? <a id="tg">Creează un cont de firmă</a>';
+      toggle.innerHTML = 'Firmă nouă? <a id="tg">Solicită înregistrarea firmei</a>';
     }
     const tg=document.getElementById('tg'); if(tg) tg.addEventListener('click', ()=>{ mode = mode==='signup'?'login':'signup'; render(); });
   }
   render();
   f.addEventListener('submit', async (e)=>{
-    e.preventDefault(); err.textContent=''; btn.disabled=true;
+    e.preventDefault(); err.textContent=''; okEl.textContent=''; btn.disabled=true;
     const id=document.getElementById('uid').value.trim(), password=document.getElementById('pwd').value;
-    const company=document.getElementById('company').value.trim();
+    const company=document.getElementById('company').value.trim(), email=document.getElementById('email').value.trim();
     try{
       const url = mode==='signup' ? '/api/signup' : '/api/login';
-      const payload = mode==='signup' ? {company,id,password} : {id,password};
+      const payload = mode==='signup' ? {company,id,password,email} : {id,password};
       const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const d=await r.json().catch(()=>({}));
+      if(d && d.pending){ okEl.textContent='✓ Cererea a fost trimisă. Vei putea intra cu id-ul și parola alese după ce este aprobată.'; f.reset(); btn.disabled=false; return; }
       if(r.ok){ location.reload(); return; }
       err.textContent=d.error||'Eroare.'; btn.disabled=false;
     }catch(ex){ err.textContent='Conexiune eșuată.'; btn.disabled=false; }
