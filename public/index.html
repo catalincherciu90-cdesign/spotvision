@@ -195,6 +195,20 @@
   /* pe ecran micsoram intreaga previzualizare ca sa incapa (zoom reflow-eaza corect) */
   #labelsSheet{zoom:.6}
   @media(max-width:860px){ #labelsSheet{zoom:.4} }
+  /* picking (culegere) */
+  .pickrow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+  .pickrow input.pk-prod{flex:1 1 auto;min-width:0}
+  .pickrow input.pk-qty{width:78px;flex:0 0 auto;text-align:center}
+  .pickrow .pk-rm{flex:0 0 auto;width:34px;height:38px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;color:#b91c1c}
+  #pickResult table{width:100%;border-collapse:collapse;font-size:14px}
+  #pickResult th,#pickResult td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+  #pickResult th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  #pickResult td.q{text-align:right;font-weight:800;white-space:nowrap}
+  #pickResult td .loc{font-weight:800;color:var(--accent-d)}
+  #pickResult .pk-short{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:14px;font-weight:600}
+  #pickResult .pk-done{color:#16a34a;font-weight:700;margin-top:10px}
+  #pickResult .pk-empty{color:var(--muted)}
+  @media(max-width:640px){ #pickResult th,#pickResult td{padding:7px 6px;font-size:13px} }
 </style>
 </head>
 <body>
@@ -204,6 +218,7 @@
   <div class="tabs">
     <button class="tab active" data-v="schema">Schemă locații</button>
     <button class="tab" data-v="inv">Inventar</button>
+    <button class="tab" data-v="pick">Picking</button>
     <button class="tab" data-v="dim">Dimensiuni raft</button>
     <button class="tab" data-v="tech">Schiță tehnică</button>
     <button class="tab" data-v="labels">Etichete</button>
@@ -500,6 +515,35 @@
   </div>
 </div>
 </div>
+
+<!-- ============ VIEW: PICKING (culegere comanda) ============ -->
+<div id="viewPick" hidden>
+<div class="wrap">
+  <div class="controls">
+    <div class="card">
+      <h2>Comandă de cules</h2>
+      <p class="hint" style="margin-top:0">Adaugă produsele și cantitățile. Aplicația îți spune din ce locații să iei, în ordine FIFO (cel mai vechi primul).</p>
+      <div id="pickRows"></div>
+      <button class="addr" id="pickAdd">➕ Adaugă produs</button>
+      <button class="main" id="pickGen" style="margin-top:12px">Generează lista de cules</button>
+      <button class="main ghost" id="pickClear" style="margin-top:6px">Golește</button>
+    </div>
+    <div class="card">
+      <h2>Acțiuni</h2>
+      <button class="main alt" id="pickPrint">🖨️ Printează lista</button>
+      <button class="main" id="pickConfirm" style="margin-top:8px;background:#16a34a">✓ Confirmă ridicarea (scade din stoc)</button>
+      <p class="hint" style="margin-top:8px">La confirmare, cantitățile culese se scad din inventar. Fără confirmare, stocul rămâne neatins.</p>
+      <div class="status" id="pickStatus"></div>
+    </div>
+  </div>
+  <div>
+    <p class="sub noprint">Lista de cules — ordonată pe locații (traseu), cu cantitatea de luat din fiecare.</p>
+    <div class="stage"><div id="pickResult"></div></div>
+  </div>
+</div>
+</div>
+
+<datalist id="pickProdList"></datalist>
 
 <!-- Scanner cod (QR / bare) cu camera telefonului -->
 <div id="scanModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.92);z-index:1000;flex-direction:column;align-items:center;justify-content:center;padding:16px">
@@ -2827,10 +2871,12 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   $('viewDim').hidden=v!=='dim';
   $('viewTech').hidden=v!=='tech';
   { const vl=$('viewLabels'); if(vl) vl.hidden=v!=='labels'; }
+  { const vp=$('viewPick'); if(vp) vp.hidden=v!=='pick'; }
   const vu=$('viewUsers'); if(vu) vu.hidden=v!=='users';
   refresh();
   if(v==='schema') setTimeout(fitZoom,30); // incadreaza automat pe ecran
   if(v==='labels') renderLabels();
+  if(v==='pick') initPick();
 }));
 
 // ---------- RAFTURI (cu id stabil) ----------
@@ -3596,6 +3642,115 @@ function closeScanner(){
   const v=$('scanVideo'); if(v) v.srcObject=null;
   $('scanModal').style.display='none';
 }
+
+// ---------- PICKING (culegere comanda, FIFO) ----------
+let lastPicks=null;   // ultima lista generata (pentru confirmare/printare)
+function pickProdOptions(){
+  const set=new Set();
+  Object.keys(inventory).forEach(code=>inventory[code].forEach(p=>{ if(p.produs) set.add(String(p.produs)); if(p.cod) set.add(String(p.cod)); }));
+  const dl=$('pickProdList'); if(dl) dl.innerHTML=[...set].sort().map(n=>`<option value="${esc(n)}">`).join('');
+}
+function pickRowHTML(prod,qty){
+  return `<div class="pickrow"><input class="pk-prod" list="pickProdList" placeholder="Produs sau cod SKU" value="${esc(prod||'')}"><input class="pk-qty" type="number" min="1" placeholder="Cant." value="${qty||''}"><button class="pk-rm" title="Șterge rândul" type="button">✕</button></div>`;
+}
+function addPickRow(prod,qty){ const box=$('pickRows'); box.insertAdjacentHTML('beforeend', pickRowHTML(prod,qty)); }
+function initPick(){
+  pickProdOptions();
+  if(!$('pickRows').querySelector('.pickrow')) addPickRow('','');
+  renderPicking(lastPicks);
+}
+// citeste comanda din randuri (produse cu cantitati), unind duplicatele
+function readOrder(){
+  const map=new Map();
+  $('pickRows').querySelectorAll('.pickrow').forEach(r=>{
+    const term=r.querySelector('.pk-prod').value.trim(); const qty=+r.querySelector('.pk-qty').value||0;
+    if(!term||qty<=0) return;
+    const k=term.toLowerCase(); map.set(k, {term, qty:(map.get(k)?.qty||0)+qty});
+  });
+  return [...map.values()];
+}
+// gaseste toate intrarile din inventar care corespund unui produs/cod
+function matchEntries(term){
+  const t=term.toLowerCase(), out=[];
+  Object.keys(inventory).forEach(code=>inventory[code].forEach(p=>{
+    const nm=String(p.produs||'').toLowerCase(), cd=String(p.cod||'').toLowerCase();
+    if(nm===t||cd===t||nm.includes(t)) out.push({code, e:p});
+  }));
+  // FIFO: dupa data (cel mai vechi primul), apoi dupa cod locatie (traseu)
+  out.sort((a,b)=>{ const f=byFifo(a.e,b.e); return f!==0?f:(a.code<b.code?-1:a.code>b.code?1:0); });
+  return out;
+}
+// aloca FIFO cantitatile cerute pe locatii
+function buildPicking(order){
+  const picks=[], shorts=[];
+  order.forEach(o=>{
+    let need=o.qty; const cands=matchEntries(o.term);
+    for(const c of cands){ if(need<=0) break; const av=+c.e.cant||0; if(av<=0) continue;
+      const take=Math.min(need, av);
+      picks.push({code:c.code, produs:c.e.produs, cod:c.e.cod||'', data:c.e.data||'', take, avail:av});
+      need-=take; }
+    if(need>0) shorts.push({term:o.term, missing:need});
+  });
+  // ordoneaza lista dupa locatie (traseu de mers)
+  picks.sort((a,b)=>a.code<b.code?-1:a.code>b.code?1:0);
+  return {picks, shorts};
+}
+function renderPicking(res){
+  const box=$('pickResult'); if(!box) return;
+  if(!res){ box.innerHTML='<p class="pk-empty">Adaugă produse și apasă „Generează lista de cules".</p>'; return; }
+  let h='';
+  res.shorts.forEach(s=>h+=`<div class="pk-short">⚠️ ${esc(s.term)}: lipsă ${s.missing} buc în stoc.</div>`);
+  if(!res.picks.length){ box.innerHTML=h||'<p class="pk-empty">Niciun produs găsit în stoc pentru comanda dată.</p>'; return; }
+  h+='<table><thead><tr><th>#</th><th>Locație</th><th>Produs</th><th>Cod</th><th>Data</th><th style="text-align:right">De cules</th></tr></thead><tbody>';
+  res.picks.forEach((p,i)=>h+=`<tr><td>${i+1}</td><td><span class="loc">${esc(p.code)}</span></td><td>${esc(p.produs)}${p.data?'<span class="fifo-tag">FIFO</span>':''}</td><td>${esc(p.cod||'—')}</td><td>${esc(p.data||'—')}</td><td class="q">${p.take}${p.take<p.avail?' <span style="color:#94a3b8;font-weight:600">/ '+p.avail+'</span>':''}</td></tr>`);
+  const tot=res.picks.reduce((a,p)=>a+p.take,0);
+  h+=`<tr><td></td><td class="loc">Total</td><td></td><td></td><td></td><td class="q">${tot}</td></tr></tbody></table>`;
+  box.innerHTML=h;
+}
+function genPicking(){
+  const order=readOrder();
+  if(!order.length){ renderPicking(null); lastPicks=null; $('pickStatus').textContent='Adaugă cel puțin un produs cu cantitate.'; return; }
+  const res=buildPicking(order); lastPicks=res; renderPicking(res);
+  const tot=res.picks.reduce((a,p)=>a+p.take,0);
+  $('pickStatus').textContent=`${res.picks.length} locații de vizitat · ${tot} buc de cules`+(res.shorts.length?` · ${res.shorts.length} produs(e) cu lipsă`:'');
+}
+// scade din stoc cantitatile culese (la confirmare)
+function confirmPicking(){
+  if(window.__readonly){ $('pickStatus').textContent='Cont de vizualizare — nu poți modifica stocul.'; return; }
+  if(!lastPicks||!lastPicks.picks.length){ $('pickStatus').textContent='Generează întâi lista de cules.'; return; }
+  if(!confirm('Confirmi ridicarea? Cantitățile culese se vor scădea din stoc.')) return;
+  const touched=new Set();
+  lastPicks.picks.forEach(p=>{
+    const arr=inventory[p.code.toUpperCase()]; if(!arr) return;
+    const e=arr.find(x=>String(x.produs)===String(p.produs)&&String(x.cod||'')===String(p.cod||'')&&String(x.data||'')===String(p.data||''));
+    if(!e) return; e.cant=(+e.cant||0)-p.take; touched.add(p.code.toUpperCase());
+  });
+  // curata intrarile ramase pe 0 si locatiile goale
+  touched.forEach(code=>{
+    let arr=(inventory[code]||[]).filter(x=>(+x.cant||0)>0);
+    if(arr.length) inventory[code]=arr; else delete inventory[code];
+    pushLoc(code, inventory[code]||[]);
+  });
+  saveState(); refresh(); pickProdOptions();
+  const tot=lastPicks.picks.reduce((a,p)=>a+p.take,0);
+  lastPicks=null; renderPicking(null);
+  $('pickStatus').innerHTML=`<span class="pk-done">✓ Ridicare confirmată — ${tot} buc scăzute din stoc.</span>`;
+}
+function printPicking(){
+  if(!lastPicks||!lastPicks.picks.length){ alert('Generează întâi lista de cules.'); return; }
+  const rows=lastPicks.picks.map((p,i)=>`<tr><td>${i+1}</td><td><b>${esc(p.code)}</b></td><td>${esc(p.produs)}</td><td>${esc(p.cod||'—')}</td><td>${esc(p.data||'—')}</td><td style="text-align:right"><b>${p.take}</b></td></tr>`).join('');
+  const shorts=lastPicks.shorts.map(s=>`<div style="color:#b91c1c;font-weight:700">Lipsă: ${esc(s.term)} — ${s.missing} buc</div>`).join('');
+  const css=`*{font-family:Arial,Helvetica,sans-serif} body{padding:18px;color:#0f172a} h1{font-size:20px;margin:0 0 4px} .sub{color:#64748b;font-size:13px;margin:0 0 14px} table{width:100%;border-collapse:collapse;font-size:14px} th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0} th{background:#f1f5f9;text-transform:uppercase;font-size:11px;color:#475569}`;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Listă de cules</title><style>${css}</style></head><body><h1>Listă de cules</h1><p class="sub">Ordonată pe locații (traseu) · FIFO</p>${shorts}<table><thead><tr><th>#</th><th>Locație</th><th>Produs</th><th>Cod</th><th>Data</th><th style="text-align:right">De cules</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.focus();window.print();}<\/script></body></html>`;
+  const w=window.open('','_blank'); if(!w){ alert('Permite ferestrele pop-up pentru a printa.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+$('pickAdd').addEventListener('click', ()=>addPickRow('',''));
+$('pickRows').addEventListener('click', e=>{ if(e.target.classList.contains('pk-rm')){ const rows=$('pickRows').querySelectorAll('.pickrow'); if(rows.length>1) e.target.closest('.pickrow').remove(); else { e.target.closest('.pickrow').querySelector('.pk-prod').value=''; e.target.closest('.pickrow').querySelector('.pk-qty').value=''; } } });
+$('pickGen').addEventListener('click', genPicking);
+$('pickClear').addEventListener('click', ()=>{ $('pickRows').innerHTML=''; addPickRow('',''); lastPicks=null; renderPicking(null); $('pickStatus').textContent=''; });
+$('pickPrint').addEventListener('click', printPicking);
+$('pickConfirm').addEventListener('click', confirmPicking);
 let schemaFilterInit=false;
 function syncSchemaFilter(){
   const sel=$('schemaRackFilter'); if(!sel) return; const prev=sel.value, rs=readRacks();
