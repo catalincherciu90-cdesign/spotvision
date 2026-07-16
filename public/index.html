@@ -4370,7 +4370,7 @@ initApp();
       if(st && st.authenticated){
         const role=st.role||'operator';
         const lbl=role==='admin'?'Admin':(role==='viewer'?'Vizualizare':'Operator');
-        $('authUser').textContent = (st.id||'') + ' · ' + lbl;
+        $('authUser').textContent = (st.id||'') + ' · ' + lbl + (st.tenantName? ' · ' + st.tenantName : '');
         bar.style.display = 'flex';
         applyRole(role);
         if(typeof applyTabs==='function') applyTabs(st.tabs, role);
