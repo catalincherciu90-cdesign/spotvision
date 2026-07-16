@@ -5,16 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Warehouse Organizer</title>
 <style>
-  :root{--bg:#f4f5f7;--card:#fff;--ink:#1a1d21;--muted:#6b7280;--line:#e4e6ea;--accent:#2563eb;--accent-d:#1d4ed8}
+  /* paleta extrasa din logo: navy inchis + verde, pe fundal deschis */
+  :root{--bg:#f4f6f4;--card:#fff;--ink:#1e2b34;--muted:#5c6b73;--line:#e2e7e5;--accent:#4a8f24;--accent-d:#3a721c;--brand-navy:#1e2b34;--brand-green:#6cb33f}
   *{box-sizing:border-box}
+  input[type=range]{accent-color:var(--accent)}
+  input[type=checkbox]{accent-color:var(--accent)}
   body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45}
   header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 24px 0}
   header h1{margin:0;font-size:20px}
   header p{margin:4px 0 12px;color:var(--muted);font-size:14px}
-  .tabs{display:inline-flex;gap:5px;flex-wrap:wrap;background:#eef1f6;padding:5px;border-radius:13px;margin-bottom:2px}
+  .tabs{display:inline-flex;gap:5px;flex-wrap:wrap;background:#eaf0e8;padding:5px;border-radius:13px;margin-bottom:2px}
   .tab{background:none;border:0;border-radius:9px;padding:9px 16px;font-size:14.5px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;transition:background .15s,color .15s,box-shadow .15s}
   .tab:hover{background:#fff;color:var(--ink)}
-  .tab.active{background:var(--accent);color:#fff;box-shadow:0 2px 7px rgba(37,99,235,.35)}
+  .tab.active{background:var(--accent);color:#fff;box-shadow:0 2px 7px rgba(74,143,36,.35)}
   .tab.active:hover{background:var(--accent-d);color:#fff}
   .badge{display:inline-block;margin:8px 0 12px;font-size:12px;font-weight:600;padding:3px 11px;border-radius:20px}
   .badge.on{background:#dcfce7;color:#15803d}
@@ -244,8 +247,8 @@
   <div id="syncBadge" class="badge">—</div>
   <div id="authBar" style="position:absolute;top:12px;right:14px;font-size:13px;color:#64748b;display:none;align-items:center;gap:10px">
     <span>cont: <b id="authUser" style="color:#334155"></b></span>
-    <a href="#" id="btnUsers" style="color:#0ea5e9;text-decoration:none">Utilizatori</a>
-    <a href="#" id="btnLogout" style="color:#0ea5e9;text-decoration:none">Ieșire</a>
+    <a href="#" id="btnUsers" style="color:#3a721c;text-decoration:none">Utilizatori</a>
+    <a href="#" id="btnLogout" style="color:#3a721c;text-decoration:none">Ieșire</a>
   </div>
 </header>
 
@@ -270,7 +273,7 @@
     <div class="card" id="rolesInfo">
       <h2>Tipuri de utilizatori</h2>
       <p class="hint" style="margin-top:0"><b style="color:#7c3aed">Admin</b> — acces total: editează + adaugă/șterge utilizatori.<br>
-      <b style="color:#0ea5e9">Operator</b> — editează inventarul și schema, dar nu gestionează utilizatori.<br>
+      <b style="color:#3a721c">Operator</b> — editează inventarul și schema, dar nu gestionează utilizatori.<br>
       <b style="color:#64748b">Vizualizare</b> — doar vede schema și inventarul, nu poate modifica.</p>
     </div>
   </div>
