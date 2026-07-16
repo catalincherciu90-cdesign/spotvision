@@ -146,6 +146,23 @@ async function getRole(env, id) {
   return r ? (r.role || 'operator') : null;
 }
 
+// ---- permisiuni pe taburi per utilizator (NULL = toate) ----
+const TAB_KEYS = ['schema', 'inv', 'pick', 'dim', 'tech', 'labels', 'users', 'log'];
+let tabsColReady = false;
+async function ensureTabs(env) {
+  if (tabsColReady) return;
+  try { await env.DB.prepare('ALTER TABLE users ADD COLUMN tabs TEXT').run(); } catch (e) { /* exista deja */ }
+  tabsColReady = true;
+}
+function parseTabs(v) {
+  if (!v) return null;
+  try { const a = JSON.parse(v); return Array.isArray(a) ? a.filter(t => TAB_KEYS.includes(t)) : null; } catch (e) { return null; }
+}
+async function getTabs(env, id) {
+  const r = await env.DB.prepare('SELECT tabs FROM users WHERE id = ?1').bind(id).first();
+  return r ? parseTabs(r.tabs) : null;
+}
+
 // ---- jurnal de activitate ----
 let activityReady = false;
 async function ensureActivity(env) {
@@ -215,14 +232,15 @@ export default {
 
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
-    if (p.startsWith('/api/')) await ensureRole(env);
+    if (p.startsWith('/api/')) { await ensureRole(env); await ensureTabs(env); }
 
     // ---------- rute publice de auth ----------
     if (p === '/api/auth-status' && method === 'GET') {
       const session = await getSession(req, env);
       const setup = (await userCount(env)) === 0;
       const role = session ? await getRole(env, session.sub) : null;
-      return json({ setup, authenticated: !!session, id: session ? session.sub : null, role });
+      const tabs = session ? await getTabs(env, session.sub) : null;
+      return json({ setup, authenticated: !!session, id: session ? session.sub : null, role, tabs });
     }
 
     if (p === '/api/register' && method === 'POST') {
@@ -282,9 +300,24 @@ export default {
     if (p === '/api/users') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
       if (method === 'GET') {
-        const { results } = await env.DB.prepare('SELECT id, created_at, role FROM users ORDER BY created_at').all();
-        return json({ users: results || [], me: session.sub, myRole });
+        const { results } = await env.DB.prepare('SELECT id, created_at, role, tabs FROM users ORDER BY created_at').all();
+        const users = (results || []).map(u => ({ id: u.id, created_at: u.created_at, role: u.role, tabs: parseTabs(u.tabs) }));
+        return json({ users, me: session.sub, myRole, allTabs: TAB_KEYS });
       }
+    }
+    // setare taburi permise pentru un utilizator (admin)
+    const mTabs = p.match(/^\/api\/users\/(.+)\/tabs$/);
+    if (mTabs && method === 'POST') {
+      if (!session) return json({ error: 'Neautentificat.' }, 401);
+      if (myRole !== 'admin') return json({ error: 'Doar administratorii pot schimba permisiunile.' }, 403);
+      const target = decodeURIComponent(mTabs[1]);
+      const body = await readBody(req);
+      let tabs = Array.isArray(body && body.tabs) ? body.tabs.filter(t => TAB_KEYS.includes(t)) : null;
+      // null / lista completa => acces la toate (stocam NULL)
+      const store = (!tabs || tabs.length >= TAB_KEYS.length) ? null : JSON.stringify(tabs);
+      await env.DB.prepare('UPDATE users SET tabs = ?1 WHERE id = ?2').bind(store, target).run();
+      await logAct(env, session.sub, 'A schimbat taburile pentru „' + target + '”');
+      return json({ ok: true, tabs: parseTabs(store) });
     }
     const mUser = p.match(/^\/api\/users\/(.+)$/);
     if (mUser && method === 'DELETE') {

@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS users (
   id         TEXT PRIMARY KEY,
   pass_hash  TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  role       TEXT NOT NULL DEFAULT 'operator'  -- 'admin' | 'operator' | 'viewer'
+  role       TEXT NOT NULL DEFAULT 'operator',  -- 'admin' | 'operator' | 'viewer'
+  tabs       TEXT                                -- JSON cu taburile permise; NULL = toate
 );
 
 -- Config intern (ex: secretul de semnare a sesiunilor, auto-generat).
