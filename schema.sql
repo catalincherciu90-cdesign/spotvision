@@ -38,3 +38,9 @@ CREATE TABLE IF NOT EXISTS activity (
   action TEXT NOT NULL,
   cat    TEXT NOT NULL DEFAULT 'platforma'
 );
+
+-- Prezenta (cine e conectat): ultima activitate a fiecarui utilizator.
+CREATE TABLE IF NOT EXISTS presence (
+  user      TEXT PRIMARY KEY,
+  last_seen INTEGER NOT NULL
+);
