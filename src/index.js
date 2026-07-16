@@ -145,6 +145,10 @@ async function getRole(env, id) {
   const r = await env.DB.prepare('SELECT role FROM users WHERE id = ?1').bind(id).first();
   return r ? (r.role || 'operator') : null;
 }
+async function masterCount(env) {
+  const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'master'").first();
+  return r ? r.n : 0;
+}
 
 // ---- permisiuni pe taburi per utilizator (NULL = toate) ----
 const TAB_KEYS = ['schema', 'inv', 'pick', 'dim', 'tech', 'labels', 'users', 'log'];
@@ -277,7 +281,8 @@ export default {
       const tabs = session ? await getTabs(env, session.sub) : null;
       const tid = session ? (session.t || await getUserTenant(env, session.sub)) : null;
       const tname = tid ? await tenantName(env, tid) : '';
-      return json({ setup, authenticated: !!session, id: session ? session.sub : null, role, tabs, tenant: tid, tenantName: tname });
+      const masterExists = (await masterCount(env)) > 0;
+      return json({ setup, authenticated: !!session, id: session ? session.sub : null, role, tabs, tenant: tid, tenantName: tname, masterExists, canClaimMaster: !!session && role === 'admin' && !masterExists });
     }
 
     // ---------- inregistrare firma noua (public): creeaza gestiune + admin ----------
@@ -312,7 +317,7 @@ export default {
       // adaugarea de colegi se face DOAR de un admin, in firma lui
       const s = await getSession(req, env);
       if (!s) return json({ error: 'Trebuie să fii autentificat. Pentru o firmă nouă folosește „Creează firmă nouă”.' }, 401);
-      if ((await getRole(env, s.sub)) !== 'admin') return json({ error: 'Doar administratorii pot adăuga utilizatori.' }, 403);
+      { const rr = await getRole(env, s.sub); if (rr !== 'admin' && rr !== 'master') return json({ error: 'Doar administratorii pot adăuga utilizatori.' }, 403); }
       const stid = s.t || await getUserTenant(env, s.sub);
 
       const exists = await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(uid).first();
@@ -349,6 +354,7 @@ export default {
     const session = await getSession(req, env);
     const myRole = session ? await getRole(env, session.sub) : null;
     const tid = session ? (session.t || await getUserTenant(env, session.sub)) : null;
+    const adminish = (myRole === 'admin' || myRole === 'master'); // master = admin + platforma
 
     // gestionare utilizatori (doar din propria firma)
     if (p === '/api/users') {
@@ -363,7 +369,7 @@ export default {
     const mTabs = p.match(/^\/api\/users\/(.+)\/tabs$/);
     if (mTabs && method === 'POST') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
-      if (myRole !== 'admin') return json({ error: 'Doar administratorii pot schimba permisiunile.' }, 403);
+      if (!adminish) return json({ error: 'Doar administratorii pot schimba permisiunile.' }, 403);
       const target = decodeURIComponent(mTabs[1]);
       if (await getUserTenant(env, target) !== tid) return json({ error: 'Utilizator din altă firmă.' }, 403);
       const body = await readBody(req);
@@ -376,7 +382,7 @@ export default {
     const mUser = p.match(/^\/api\/users\/(.+)$/);
     if (mUser && method === 'DELETE') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
-      if (myRole !== 'admin') return json({ error: 'Doar administratorii pot șterge utilizatori.' }, 403);
+      if (!adminish) return json({ error: 'Doar administratorii pot șterge utilizatori.' }, 403);
       const target = decodeURIComponent(mUser[1]);
       if (await getUserTenant(env, target) !== tid) return json({ error: 'Utilizator din altă firmă.' }, 403);
       if ((await tenantUserCount(env, tid)) <= 1) return json({ error: 'Nu poți șterge ultimul cont din firmă.' }, 400);
@@ -391,7 +397,7 @@ export default {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
       if (method === 'GET') { return json(await getCompany(env, tid)); }
       if (method === 'POST' || method === 'PUT') {
-        if (myRole !== 'admin') return json({ error: 'Doar administratorii pot edita datele firmei.' }, 403);
+        if (!adminish) return json({ error: 'Doar administratorii pot edita datele firmei.' }, 403);
         const body = await readBody(req) || {};
         const name = String(body.name || '').trim().slice(0, 60);
         const d = {};
@@ -400,6 +406,70 @@ export default {
         await logAct(env, tid, session.sub, 'A actualizat datele firmei', 'platforma');
         return json({ ok: true, ...(await getCompany(env, tid)) });
       }
+    }
+
+    // ---------- MASTER: administrator de platforma (toate firmele) ----------
+    // preluare rol master (o singura data, de un admin, cat timp nu exista master)
+    if (p === '/api/master/claim' && method === 'POST') {
+      if (!session) return json({ error: 'Neautentificat.' }, 401);
+      if ((await masterCount(env)) > 0) return json({ error: 'Există deja un cont master.' }, 409);
+      if (myRole !== 'admin') return json({ error: 'Doar un administrator poate deveni master.' }, 403);
+      await env.DB.prepare("UPDATE users SET role = 'master' WHERE id = ?1").bind(session.sub).run();
+      await logAct(env, tid, session.sub, 'A devenit master al platformei', 'platforma');
+      return json({ ok: true });
+    }
+    if (p.startsWith('/api/master/')) {
+      if (!session) return json({ error: 'Neautentificat.' }, 401);
+      if (myRole !== 'master') return json({ error: 'Doar contul master.' }, 403);
+
+      if (p === '/api/master/tenants' && method === 'GET') {
+        const tenants = (await env.DB.prepare('SELECT id, name, details, created_at FROM tenants ORDER BY created_at').all()).results || [];
+        const uc = {}; for (const r of (await env.DB.prepare('SELECT tenant, COUNT(*) AS n FROM users GROUP BY tenant').all()).results || []) uc[r.tenant] = r.n;
+        const oc = {}; const cutoff = Date.now() - 90 * 1000; for (const r of (await env.DB.prepare('SELECT tenant, COUNT(*) AS n FROM presence_mt WHERE last_seen > ?1 GROUP BY tenant').bind(cutoff).all()).results || []) oc[r.tenant] = r.n;
+        const ic = {}; for (const r of (await env.DB.prepare('SELECT tenant, COUNT(*) AS n FROM inventory_mt GROUP BY tenant').all()).results || []) ic[r.tenant] = r.n;
+        const list = tenants.map(t => { let d = {}; try { d = t.details ? JSON.parse(t.details) : {}; } catch (e) {} return { id: t.id, name: t.name, details: d, created_at: t.created_at, users: uc[t.id] || 0, online: oc[t.id] || 0, locations: ic[t.id] || 0 }; });
+        return json({ tenants: list, myTenant: tid });
+      }
+      if (p === '/api/master/tenants' && method === 'POST') {
+        const body = await readBody(req) || {};
+        const cname = String(body.company || '').trim();
+        const uid = String(body.id || '').trim();
+        if (!cname) return json({ error: 'Completează numele firmei.' }, 400);
+        if (!/^[a-zA-Z0-9._-]{2,40}$/.test(uid)) return json({ error: 'Id admin: 2-40 caractere (litere, cifre, . _ -).' }, 400);
+        if (String(body.password || '').length < 6) return json({ error: 'Parola: minim 6 caractere.' }, 400);
+        if (await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(uid).first()) return json({ error: 'Id de cont deja folosit.' }, 409);
+        const ntid = 't_' + toHex(crypto.getRandomValues(new Uint8Array(8)));
+        await env.DB.prepare('INSERT INTO tenants (id, name, created_at) VALUES (?1, ?2, ?3)').bind(ntid, cname.slice(0, 60), Date.now()).run();
+        const hash = await hashPassword(String(body.password));
+        await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role, tenant) VALUES (?1, ?2, ?3, ?4, ?5)').bind(uid, hash, Date.now(), 'admin', ntid).run();
+        await env.DB.prepare("INSERT OR IGNORE INTO config_mt (tenant, racks, g) VALUES (?1, '[]', '{}')").bind(ntid).run();
+        await logAct(env, ntid, session.sub, 'Master a creat firma „' + cname + '”', 'platforma');
+        return json({ ok: true, id: ntid });
+      }
+      const mT = p.match(/^\/api\/master\/tenants\/(.+)$/);
+      if (mT) {
+        const targetT = decodeURIComponent(mT[1]);
+        if (method === 'POST') { // redenumire
+          const body = await readBody(req) || {};
+          const nm = String(body.name || '').trim().slice(0, 60);
+          if (!nm) return json({ error: 'Nume gol.' }, 400);
+          await env.DB.prepare('UPDATE tenants SET name = ?1 WHERE id = ?2').bind(nm, targetT).run();
+          return json({ ok: true });
+        }
+        if (method === 'DELETE') {
+          if (targetT === tid) return json({ error: 'Nu poți șterge firma din care faci parte.' }, 400);
+          await env.DB.batch([
+            env.DB.prepare('DELETE FROM users WHERE tenant = ?1').bind(targetT),
+            env.DB.prepare('DELETE FROM config_mt WHERE tenant = ?1').bind(targetT),
+            env.DB.prepare('DELETE FROM inventory_mt WHERE tenant = ?1').bind(targetT),
+            env.DB.prepare('DELETE FROM presence_mt WHERE tenant = ?1').bind(targetT),
+            env.DB.prepare('DELETE FROM activity WHERE tenant = ?1').bind(targetT),
+            env.DB.prepare('DELETE FROM tenants WHERE id = ?1').bind(targetT),
+          ]);
+          return json({ ok: true });
+        }
+      }
+      return json({ error: 'Not found' }, 404);
     }
 
     // ---------- prezenta (permisa si pentru viewer), izolata pe firma ----------

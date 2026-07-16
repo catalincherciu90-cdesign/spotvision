@@ -237,6 +237,14 @@
   .log-row .lg-act{flex:1;min-width:0;color:var(--ink)}
   .log-empty{color:var(--muted);padding:8px 4px}
   @media(max-width:640px){ .log-row{flex-wrap:wrap;gap:2px 10px} .log-row .lg-time{width:auto;order:3;flex-basis:100%} }
+  /* master: lista de firme */
+  #mList{display:flex;flex-direction:column;gap:8px}
+  .firm{border:1px solid var(--line);border-radius:9px;padding:11px 13px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+  .firm .f-name{font-weight:800;color:#0f172a;font-size:15px}
+  .firm .f-meta{font-size:12px;color:var(--muted);margin-top:3px}
+  .firm .f-act{display:flex;gap:12px;white-space:nowrap;align-items:center}
+  .firm .f-act a{text-decoration:none;font-size:13px;cursor:pointer}
+  .firm .f-online{color:#16a34a;font-weight:700}
   #orderList{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
   .order-item{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;cursor:pointer;background:#fff}
   .order-item.active{border-color:var(--accent);background:#eff6ff}
@@ -259,6 +267,7 @@
     <button class="tab" data-v="labels">Etichete</button>
     <button class="tab" data-v="users">Utilizatori</button>
     <button class="tab" data-v="log">Activitate</button>
+    <button class="tab" data-v="master" id="tabMaster" style="display:none">🛡️ Master</button>
   </div>
   <div id="syncBadge" class="badge">—</div>
   <div id="authBar" style="position:absolute;top:12px;right:14px;font-size:13px;color:#64748b;display:none;align-items:center;gap:10px">
@@ -307,6 +316,12 @@
       <p class="hint" style="margin-top:0"><b style="color:#7c3aed">Admin</b> — acces total: editează + adaugă/șterge utilizatori.<br>
       <b style="color:#3a721c">Operator</b> — editează inventarul și schema, dar nu gestionează utilizatori.<br>
       <b style="color:#64748b">Vizualizare</b> — doar vede schema și inventarul, nu poate modifica.</p>
+    </div>
+    <div class="card" id="masterClaimCard" style="display:none">
+      <h2>🛡️ Master platformă</h2>
+      <p class="hint" style="margin-top:0">Nu există încă un cont master. Poți deveni tu administratorul întregii platforme (gestionezi toate firmele).</p>
+      <button class="main" id="mClaim" style="background:#7c3aed">Devino master al platformei</button>
+      <div class="status" id="mClaimStatus"></div>
     </div>
   </div>
   <div>
@@ -631,6 +646,32 @@
     </div>
     <p class="sub noprint">Ultimele acțiuni (max 300).</p>
     <div class="stage"><div id="logList"></div></div>
+  </div>
+</div>
+</div>
+
+<!-- ============ VIEW: MASTER (administrare platforma) ============ -->
+<div id="viewMaster" hidden>
+<div class="wrap">
+  <div class="controls">
+    <div class="card">
+      <h2>🛡️ Master — toată platforma</h2>
+      <p class="hint" style="margin-top:0">Administrezi toate firmele. Fiecare firmă are datele ei separate.</p>
+      <button class="main ghost" id="mRefresh">🔄 Reîmprospătează</button>
+    </div>
+    <div class="card">
+      <h2>Firmă nouă</h2>
+      <div class="field"><label>Nume firmă</label><input id="mCompany" maxlength="60" placeholder="ex. Depozit Nord SRL"></div>
+      <div class="field"><label>Id admin</label><input id="mAdmin" maxlength="40" placeholder="ex. admin_nord"></div>
+      <div class="field"><label>Parolă admin</label><input id="mPass" type="password" placeholder="minim 6 caractere"></div>
+      <button class="main" id="mCreate">➕ Creează firma</button>
+      <div class="status" id="mStatus"></div>
+    </div>
+  </div>
+  <div>
+    <p class="total" style="margin-bottom:6px">Firme <span style="font-size:13px;font-weight:600;color:#16a34a;background:#dcfce7;padding:2px 10px;border-radius:20px;vertical-align:middle"><span id="mCount">0</span></span></p>
+    <p class="sub noprint">Toate firmele din platformă. Ștergerea unei firme îi șterge toate datele.</p>
+    <div class="stage"><div id="mList"></div></div>
   </div>
 </div>
 </div>
@@ -2978,22 +3019,25 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   { const vl=$('viewLabels'); if(vl) vl.hidden=v!=='labels'; }
   { const vp=$('viewPick'); if(vp) vp.hidden=v!=='pick'; }
   { const vg=$('viewLog'); if(vg) vg.hidden=v!=='log'; }
+  { const vm=$('viewMaster'); if(vm) vm.hidden=v!=='master'; }
   const vu=$('viewUsers'); if(vu) vu.hidden=v!=='users';
   refresh();
   if(v==='schema') setTimeout(fitZoom,30); // incadreaza automat pe ecran
   if(v==='labels') renderLabels();
   if(v==='pick') initPick();
   if(v==='log') renderLog();
+  if(v==='master' && typeof renderMaster==='function') renderMaster();
 }));
 
 // ---------- Permisiuni pe taburi ----------
 const TAB_DEFS=[['schema','Schemă locații'],['inv','Inventar'],['pick','Picking'],['dim','Dimensiuni raft'],['tech','Schiță tehnică'],['labels','Etichete'],['users','Utilizatori'],['log','Activitate']];
 function applyTabs(allowed, role){
-  window.__tabs=allowed||null;
-  const all = (role==='admin') || !allowed;   // admin sau NULL => toate taburile
+  window.__tabs=allowed||null; window.__role=role;
+  const all = (role==='admin'||role==='master') || !allowed;   // admin/master sau NULL => toate taburile
   const okTab=k=>all||allowed.includes(k);
   document.querySelectorAll('.tabs .tab').forEach(b=>{ b.style.display = okTab(b.dataset.v)?'':'none'; });
-  // linkul „Utilizatori” din colțul dreapta-sus urmează aceeași permisiune
+  // tab-ul „Master” doar pentru contul master
+  { const tm=document.getElementById('tabMaster'); if(tm) tm.style.display = (role==='master')?'':'none'; }
   { const bu=document.getElementById('btnUsers'); if(bu) bu.style.display = okTab('users')?'':'none'; }
   const active=document.querySelector('.tab.active');
   if(active && active.style.display==='none'){ const first=[...document.querySelectorAll('.tabs .tab')].find(b=>b.style.display!=='none'); if(first) first.click(); }
@@ -4001,6 +4045,47 @@ async function renderLog(){
 }
 $('logRefresh').addEventListener('click', renderLog);
 $('logTabs').addEventListener('click', e=>{ const b=e.target.closest('.logtab'); if(!b) return; logCat=b.dataset.cat; renderLog(); });
+
+// ---------- MASTER: administrare platforma (toate firmele) ----------
+function fmtDMY(ts){ try{ const d=new Date(+ts); const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()}`; }catch(_){ return ''; } }
+async function renderMaster(){
+  const box=$('mList'); if(!box) return;
+  box.innerHTML='<p class="log-empty">Se încarcă…</p>';
+  try{
+    const d=await (await fetch('/api/master/tenants')).json();
+    const list=d.tenants||[]; const cc=$('mCount'); if(cc) cc.textContent=list.length;
+    if(!list.length){ box.innerHTML='<p class="log-empty">Nicio firmă.</p>'; return; }
+    box.innerHTML='';
+    list.forEach(t=>{
+      const el=document.createElement('div'); el.className='firm';
+      const dd=t.details||{};
+      const extra=[dd.cui?('CUI '+dd.cui):'', dd.oras||'', dd.telefon||''].filter(Boolean).join(' · ');
+      el.innerHTML='<div class="f-main"><div class="f-name">'+esc(t.name)+(t.id===d.myTenant?' <span style="font-size:11px;color:#3a721c">(firma ta)</span>':'')+'</div>'
+        +'<div class="f-meta">'+t.users+' utilizatori · <span class="f-online">'+t.online+' online</span> · '+t.locations+' locații · creată '+fmtDMY(t.created_at)+(extra?(' · '+esc(extra)):'')+'</div></div>';
+      const act=document.createElement('div'); act.className='f-act';
+      const ren=document.createElement('a'); ren.textContent='redenumește'; ren.style.color='#3a721c';
+      ren.addEventListener('click', async ()=>{ const nm=prompt('Nume nou pentru firmă:', t.name); if(nm==null) return; const v=nm.trim(); if(!v) return; const r=await fetch('/api/master/tenants/'+encodeURIComponent(t.id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v})}); if(r.ok) renderMaster(); });
+      act.appendChild(ren);
+      if(t.id!==d.myTenant){
+        const del=document.createElement('a'); del.textContent='șterge'; del.style.color='#dc2626';
+        del.addEventListener('click', async ()=>{ if(!confirm('Ștergi definitiv firma „'+t.name+'” și TOATE datele ei (inventar, utilizatori, jurnal)? Acțiunea nu poate fi anulată.')) return; const r=await fetch('/api/master/tenants/'+encodeURIComponent(t.id),{method:'DELETE'}); if(r.ok) renderMaster(); else { const rd=await r.json().catch(()=>({})); alert(rd.error||'Eroare.'); } });
+        act.appendChild(del);
+      }
+      el.appendChild(act); box.appendChild(el);
+    });
+  }catch(e){ box.innerHTML='<p class="log-empty">Nu am putut încărca firmele (doar contul master are acces).</p>'; }
+}
+$('mRefresh').addEventListener('click', renderMaster);
+$('mCreate').addEventListener('click', async ()=>{
+  const body={ company:$('mCompany').value.trim(), id:$('mAdmin').value.trim(), password:$('mPass').value };
+  $('mStatus').textContent='Se creează…';
+  try{
+    const r=await fetch('/api/master/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok){ $('mStatus').textContent='✓ Firmă creată.'; $('mCompany').value=''; $('mAdmin').value=''; $('mPass').value=''; renderMaster(); }
+    else $('mStatus').textContent=d.error||'Eroare.';
+  }catch(e){ $('mStatus').textContent='Conexiune eșuată.'; }
+});
 let schemaFilterInit=false;
 function syncSchemaFilter(){
   const sel=$('schemaRackFilter'); if(!sel) return; const prev=sel.value, rs=readRacks();
@@ -4371,30 +4456,39 @@ initApp();
   const bar = $('authBar');
 
   function applyRole(role){
-    window.__role=role; window.__isAdmin=(role==='admin'); window.__readonly=(role==='viewer');
+    window.__role=role; window.__isAdmin=(role==='admin'||role==='master'); window.__readonly=(role==='viewer');
     if(role==='viewer'){
       document.body.classList.add('readonly');
       ['addRack','addProd','btnInv','btnInvClear','btnSyncSchema','btnReset','btnRackCfg','applyAll','btnLoad','btnLogo','btnLogoRemove'].forEach(id=>{ const el=$(id); if(el) el.disabled=true; });
       if(!$('roBanner')){ const b=document.createElement('div'); b.id='roBanner'; b.textContent='👁️ Cont de vizualizare — poți doar să vezi, nu să modifici.'; b.style.cssText='background:#fef9c3;color:#854d0e;font-size:13px;font-weight:600;padding:8px 14px;text-align:center'; const h=document.querySelector('header'); if(h&&h.parentNode) h.parentNode.insertBefore(b,h.nextSibling); }
     }
-    const addCard=$('addUserCard'); if(addCard) addCard.style.display=(role==='admin')?'':'none';
-    const coCard=$('companyCard'); if(coCard) coCard.style.display=(role==='admin')?'':'none';
-    const uh=$('usersHint'); if(uh&&role!=='admin') uh.textContent='Lista conturilor. Doar administratorii pot adăuga sau șterge utilizatori.';
+    const isAdm=(role==='admin'||role==='master');
+    const addCard=$('addUserCard'); if(addCard) addCard.style.display=isAdm?'':'none';
+    const coCard=$('companyCard'); if(coCard) coCard.style.display=isAdm?'':'none';
+    const uh=$('usersHint'); if(uh&&role!=='admin'&&role!=='master') uh.textContent='Lista conturilor. Doar administratorii pot adăuga sau șterge utilizatori.';
   }
   async function initAuth(){
     try{
       const st = await (await fetch('/api/auth-status')).json();
       if(st && st.authenticated){
         const role=st.role||'operator';
-        const lbl=role==='admin'?'Admin':(role==='viewer'?'Vizualizare':'Operator');
+        const lbl=role==='master'?'Master':(role==='admin'?'Admin':(role==='viewer'?'Vizualizare':'Operator'));
         $('authUser').textContent = (st.id||'') + ' · ' + lbl + (st.tenantName? ' · ' + st.tenantName : '');
         bar.style.display = 'flex';
         applyRole(role);
         if(typeof applyTabs==='function') applyTabs(st.tabs, role);
+        { const mc=$('masterClaimCard'); if(mc) mc.style.display = st.canClaimMaster ? '' : 'none'; }
         startPresence();
       }
     }catch(e){}
   }
+  const mClaimBtn=$('mClaim');
+  if(mClaimBtn) mClaimBtn.addEventListener('click', async ()=>{
+    if(!confirm('Devii master al platformei (administrezi toate firmele)? Contul tău va avea acces peste toate firmele.')) return;
+    $('mClaimStatus').textContent='Se aplică…';
+    try{ const r=await fetch('/api/master/claim',{method:'POST'}); const d=await r.json().catch(()=>({})); if(r.ok){ location.reload(); } else $('mClaimStatus').textContent=d.error||'Eroare.'; }
+    catch(e){ $('mClaimStatus').textContent='Conexiune eșuată.'; }
+  });
   // semnal periodic de prezenta: te marcheaza online si actualizeaza lista daca esti pe tab-ul Utilizatori
   function startPresence(){
     const beat=()=>{ fetch('/api/presence',{method:'POST'}).then(()=>{ const vu=$('viewUsers'); if(vu && !vu.hidden) loadUsers(); }).catch(()=>{}); };
@@ -4440,12 +4534,12 @@ initApp();
         (await fetch('/api/users')).json(),
         fetch('/api/presence').then(r=>r.json()).catch(()=>({users:[],now:Date.now()}))
       ]);
-      const me = d.me, isAdmin = d.myRole==='admin';
+      const me = d.me, isAdmin = (d.myRole==='admin'||d.myRole==='master');
       const pmap={}, pnow=pres.now||Date.now(); (pres.users||[]).forEach(p=>pmap[p.user]=p);
       const nOnline=(pres.users||[]).filter(p=>p.online).length;
       { const c=$('onlineCount'); if(c) c.textContent=nOnline+' '+(nOnline===1?'online':'online'); }
-      const roleBadge=(r)=>{ const t=r==='admin'?'Admin':(r==='viewer'?'Vizualizare':'Operator');
-        const c=r==='admin'?'#7c3aed;background:#f3e8ff':(r==='viewer'?'#64748b;background:#f1f5f9':'#0369a1;background:#e0f2fe');
+      const roleBadge=(r)=>{ const t=r==='master'?'Master':(r==='admin'?'Admin':(r==='viewer'?'Vizualizare':'Operator'));
+        const c=r==='master'?'#7c3aed;background:#ede9fe':(r==='admin'?'#7c3aed;background:#f3e8ff':(r==='viewer'?'#64748b;background:#f1f5f9':'#0369a1;background:#e0f2fe'));
         return '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;color:'+c+'">'+t+'</span>'; };
       list.innerHTML = '';
       (d.users||[]).forEach(u=>{
