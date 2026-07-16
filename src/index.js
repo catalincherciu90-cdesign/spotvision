@@ -335,9 +335,9 @@ function loginPage(setup) {
   h1{font-size:20px;margin:0 0 4px} p.sub{margin:0 0 20px;color:#94a3b8;font-size:14px}
   label{display:block;font-size:13px;margin:14px 0 6px;color:#cbd5e1}
   input{width:100%;padding:11px 12px;border-radius:9px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:15px}
-  input:focus{outline:none;border-color:#38bdf8}
-  button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:9px;background:#38bdf8;color:#08131f;font-weight:600;font-size:15px;cursor:pointer}
-  button:hover{background:#0ea5e9} button:disabled{opacity:.6;cursor:default}
+  input:focus{outline:none;border-color:#6cb33f}
+  button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:9px;background:#6cb33f;color:#08131f;font-weight:700;font-size:15px;cursor:pointer}
+  button:hover{background:#57a02c} button:disabled{opacity:.6;cursor:default}
   .err{margin-top:14px;color:#fca5a5;font-size:14px;min-height:18px}
 </style></head><body>
 <form class="card" id="f">
