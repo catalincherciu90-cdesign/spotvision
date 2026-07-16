@@ -29,3 +29,11 @@ CREATE TABLE IF NOT EXISTS meta (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL
 );
+
+-- Jurnal de activitate (cine, când, ce acțiune).
+CREATE TABLE IF NOT EXISTS activity (
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts     INTEGER NOT NULL,
+  user   TEXT NOT NULL,
+  action TEXT NOT NULL
+);

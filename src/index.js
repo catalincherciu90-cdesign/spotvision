@@ -146,6 +146,22 @@ async function getRole(env, id) {
   return r ? (r.role || 'operator') : null;
 }
 
+// ---- jurnal de activitate ----
+let activityReady = false;
+async function ensureActivity(env) {
+  if (activityReady) return;
+  try {
+    await env.DB.prepare('CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, user TEXT NOT NULL, action TEXT NOT NULL)').run();
+  } catch (e) { /* exista deja */ }
+  activityReady = true;
+}
+async function logAct(env, user, action) {
+  try {
+    await ensureActivity(env);
+    await env.DB.prepare('INSERT INTO activity (ts, user, action) VALUES (?1, ?2, ?3)').bind(Date.now(), String(user || '—'), String(action || '').slice(0, 300)).run();
+  } catch (e) { /* nu bloca actiunea din cauza jurnalului */ }
+}
+
 // ---- rate limit (best-effort, per-izolat) ----
 const rl = new Map();
 function tooMany(key, max, windowMs) {
@@ -209,6 +225,7 @@ export default {
       const hash = await hashPassword(String(password));
       await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role) VALUES (?1, ?2, ?3, ?4)')
         .bind(uid, hash, Date.now(), newRole).run();
+      await logAct(env, (session && session.sub) || uid, 'A creat contul „' + uid + '” (' + newRole + ')');
 
       // la bootstrap (primul cont) auto-login
       if (count === 0) {
@@ -227,6 +244,7 @@ export default {
         return json({ error: 'Id sau parolă greșite.' }, 401);
       }
       const token = await signJWT({ sub: user.id, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }, await getAuthSecret(env));
+      await logAct(env, user.id, 'S-a autentificat');
       return json({ ok: true, id: user.id }, 200, { 'Set-Cookie': sessionCookie(token) });
     }
 
@@ -253,6 +271,7 @@ export default {
       const target = decodeURIComponent(mUser[1]);
       if ((await userCount(env)) <= 1) return json({ error: 'Nu poți șterge ultimul cont.' }, 400);
       await env.DB.prepare('DELETE FROM users WHERE id = ?1').bind(target).run();
+      await logAct(env, session.sub, 'A șters contul „' + target + '”');
       const headers = target === session.sub ? { 'Set-Cookie': clearCookie() } : undefined;
       return json({ ok: true }, 200, headers);
     }
@@ -269,6 +288,18 @@ export default {
           return json({ racks: cfg.racks, g: cfg.g, inv });
         }
         if (p === '/api/inventory' && method === 'GET') return json(await getInventory(env));
+
+        if (p === '/api/activity' && method === 'GET') {
+          await ensureActivity(env);
+          const { results } = await env.DB.prepare('SELECT ts, user, action FROM activity ORDER BY id DESC LIMIT 300').all();
+          return json({ items: results || [] });
+        }
+        if (p === '/api/activity' && method === 'POST') {
+          const body = await readBody(req);
+          const action = String((body && body.action) || '').trim();
+          if (action) await logAct(env, session.sub, action);
+          return json({ ok: true });
+        }
 
         if (p === '/api/config' && method === 'PUT') {
           const body = await readBody(req);
