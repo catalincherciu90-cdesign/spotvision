@@ -327,7 +327,7 @@ function loginPage(setup) {
   return `<!DOCTYPE html>
 <html lang="ro"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${setup ? 'Configurare cont' : 'Autentificare'} — Rafturi depozit</title>
+<title>${setup ? 'Configurare cont' : 'Autentificare'} — Warehouse Organizer</title>
 <style>
   *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
     background:#0f172a;color:#e2e8f0;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:20px}
@@ -342,7 +342,7 @@ function loginPage(setup) {
 </style></head><body>
 <form class="card" id="f">
   <h1>${setup ? 'Creează contul de administrator' : 'Autentificare'}</h1>
-  <p class="sub">${setup ? 'Primul cont din aplicație. Cu el vei putea adăuga apoi colegi.' : 'Schema rafturi depozit'}</p>
+  <p class="sub">${setup ? 'Primul cont din aplicație. Cu el vei putea adăuga apoi colegi.' : 'Warehouse Organizer'}</p>
   <label>Id (utilizator)</label>
   <input id="uid" autocomplete="username" autofocus required>
   <label>Parolă</label>
