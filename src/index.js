@@ -151,14 +151,19 @@ let activityReady = false;
 async function ensureActivity(env) {
   if (activityReady) return;
   try {
-    await env.DB.prepare('CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, user TEXT NOT NULL, action TEXT NOT NULL)').run();
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, user TEXT NOT NULL, action TEXT NOT NULL, cat TEXT NOT NULL DEFAULT 'platforma')").run();
   } catch (e) { /* exista deja */ }
+  try {
+    // migrare: tabel vechi fara coloana de categorie
+    await env.DB.prepare("ALTER TABLE activity ADD COLUMN cat TEXT NOT NULL DEFAULT 'platforma'").run();
+  } catch (e) { /* coloana exista deja */ }
   activityReady = true;
 }
-async function logAct(env, user, action) {
+async function logAct(env, user, action, cat) {
   try {
     await ensureActivity(env);
-    await env.DB.prepare('INSERT INTO activity (ts, user, action) VALUES (?1, ?2, ?3)').bind(Date.now(), String(user || '—'), String(action || '').slice(0, 300)).run();
+    const c = cat === 'depozit' ? 'depozit' : 'platforma';
+    await env.DB.prepare('INSERT INTO activity (ts, user, action, cat) VALUES (?1, ?2, ?3, ?4)').bind(Date.now(), String(user || '—'), String(action || '').slice(0, 300), c).run();
   } catch (e) { /* nu bloca actiunea din cauza jurnalului */ }
 }
 
@@ -291,13 +296,20 @@ export default {
 
         if (p === '/api/activity' && method === 'GET') {
           await ensureActivity(env);
-          const { results } = await env.DB.prepare('SELECT ts, user, action FROM activity ORDER BY id DESC LIMIT 300').all();
-          return json({ items: results || [] });
+          const catQ = url.searchParams.get('cat');
+          let q, res;
+          if (catQ === 'depozit' || catQ === 'platforma') {
+            res = await env.DB.prepare('SELECT ts, user, action, cat FROM activity WHERE cat = ?1 ORDER BY id DESC LIMIT 300').bind(catQ).all();
+          } else {
+            res = await env.DB.prepare('SELECT ts, user, action, cat FROM activity ORDER BY id DESC LIMIT 300').all();
+          }
+          return json({ items: res.results || [] });
         }
         if (p === '/api/activity' && method === 'POST') {
           const body = await readBody(req);
           const action = String((body && body.action) || '').trim();
-          if (action) await logAct(env, session.sub, action);
+          const cat = (body && body.cat) === 'depozit' ? 'depozit' : 'platforma';
+          if (action) await logAct(env, session.sub, action, cat);
           return json({ ok: true });
         }
 

@@ -30,10 +30,11 @@ CREATE TABLE IF NOT EXISTS meta (
   v TEXT NOT NULL
 );
 
--- Jurnal de activitate (cine, când, ce acțiune).
+-- Jurnal de activitate (cine, când, ce acțiune, categorie: depozit | platforma).
 CREATE TABLE IF NOT EXISTS activity (
   id     INTEGER PRIMARY KEY AUTOINCREMENT,
   ts     INTEGER NOT NULL,
   user   TEXT NOT NULL,
-  action TEXT NOT NULL
+  action TEXT NOT NULL,
+  cat    TEXT NOT NULL DEFAULT 'platforma'
 );
