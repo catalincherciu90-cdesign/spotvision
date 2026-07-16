@@ -167,6 +167,22 @@ async function logAct(env, user, action, cat) {
   } catch (e) { /* nu bloca actiunea din cauza jurnalului */ }
 }
 
+// ---- prezenta (cine e conectat) ----
+let presenceReady = false;
+async function ensurePresence(env) {
+  if (presenceReady) return;
+  try {
+    await env.DB.prepare('CREATE TABLE IF NOT EXISTS presence (user TEXT PRIMARY KEY, last_seen INTEGER NOT NULL)').run();
+  } catch (e) { /* exista deja */ }
+  presenceReady = true;
+}
+async function touchPresence(env, user) {
+  try {
+    await ensurePresence(env);
+    await env.DB.prepare('INSERT INTO presence (user, last_seen) VALUES (?1, ?2) ON CONFLICT(user) DO UPDATE SET last_seen = ?2').bind(String(user), Date.now()).run();
+  } catch (e) { /* best-effort */ }
+}
+
 // ---- rate limit (best-effort, per-izolat) ----
 const rl = new Map();
 function tooMany(key, max, windowMs) {
@@ -250,6 +266,7 @@ export default {
       }
       const token = await signJWT({ sub: user.id, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }, await getAuthSecret(env));
       await logAct(env, user.id, 'S-a autentificat');
+      await touchPresence(env, user.id);
       return json({ ok: true, id: user.id }, 200, { 'Set-Cookie': sessionCookie(token) });
     }
 
@@ -279,6 +296,19 @@ export default {
       await logAct(env, session.sub, 'A șters contul „' + target + '”');
       const headers = target === session.sub ? { 'Set-Cookie': clearCookie() } : undefined;
       return json({ ok: true }, 200, headers);
+    }
+
+    // ---------- prezenta (permisa si pentru viewer: doar te marcheaza online) ----------
+    if (p === '/api/presence') {
+      if (!session) return json({ error: 'Neautentificat.' }, 401);
+      await ensurePresence(env);
+      if (method === 'POST') { await touchPresence(env, session.sub); }
+      const winMs = 90 * 1000; // online = vazut in ultimele 90s
+      const cutoff = Date.now() - 30 * 60000; // trimite doar prezentele din ultima jumatate de ora
+      const { results } = await env.DB.prepare('SELECT user, last_seen FROM presence WHERE last_seen > ?1 ORDER BY last_seen DESC').bind(cutoff).all();
+      const now = Date.now();
+      const users = (results || []).map(r => ({ user: r.user, last_seen: r.last_seen, online: (now - r.last_seen) <= winMs }));
+      return json({ now, users, me: session.sub });
     }
 
     // ---------- API date aplicatie (protejat) ----------
