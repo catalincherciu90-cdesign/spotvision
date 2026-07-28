@@ -317,6 +317,18 @@
       <b style="color:#3a721c">Operator</b> — editează inventarul și schema, dar nu gestionează utilizatori.<br>
       <b style="color:#64748b">Vizualizare</b> — doar vede schema și inventarul, nu poate modifica.</p>
     </div>
+    <div class="card" id="clientsCard" style="display:none">
+      <h2>🔑 Clienți (portal)</h2>
+      <p class="hint" style="margin-top:0;margin-bottom:12px">Conturi de client care se loghează în portal și văd <b>doar produsele alocate</b> lor, cu stoc și posibilitatea de a plasa comenzi.</p>
+      <div class="field"><label>Id client nou</label><input id="cliUid" placeholder="ex: client_metro"></div>
+      <div class="field"><label>Parolă</label><input id="cliPwd" type="password" placeholder="parolă"></div>
+      <div class="field"><label>Produse alocate <span style="font-weight:400;color:#94a3b8">(bifează ce poate vedea)</span></label>
+        <input id="cliProdSearch" placeholder="🔎 caută produs…" style="margin-bottom:6px">
+        <div id="cliProdPick" style="max-height:190px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px;background:#f8fafc"></div>
+      </div>
+      <button id="cliAdd" class="main">➕ Adaugă client</button>
+      <div id="cliErr" class="status" style="color:#dc2626"></div>
+    </div>
     <div class="card" id="masterClaimCard" style="display:none">
       <h2>🛡️ Master platformă</h2>
       <p class="hint" style="margin-top:0">Nu există încă un cont master. Poți deveni tu administratorul întregii platforme (gestionezi toate firmele).</p>
@@ -328,6 +340,11 @@
     <p class="total" style="margin-bottom:6px">Utilizatori <span style="font-size:13px;font-weight:600;color:#16a34a;background:#dcfce7;padding:2px 10px;border-radius:20px;vertical-align:middle">● <span id="onlineCount">0 online</span></span></p>
     <p class="sub" id="usersHint">Toate conturile care pot intra în aplicație. Punctul verde = conectat acum.</p>
     <div class="stage"><div id="usersList" style="display:flex;flex-direction:column;gap:8px"></div></div>
+    <div id="clientsWrap" style="display:none;margin-top:22px">
+      <p class="total" style="margin-bottom:6px">Clienți (portal) <span id="clientsCount" style="font-size:13px;font-weight:600;color:#3a721c;background:#eaf0e8;padding:2px 10px;border-radius:20px;vertical-align:middle">0</span></p>
+      <p class="sub">Conturile de client care intră în portal și văd doar produsele alocate lor.</p>
+      <div class="stage"><div id="clientsList" style="display:flex;flex-direction:column;gap:8px"></div></div>
+    </div>
   </div>
 </div>
 </div>
@@ -614,6 +631,13 @@
       <h2>Comenzi</h2>
       <div id="orderList"></div>
       <button class="addr" id="orderAdd">➕ Comandă nouă</button>
+    </div>
+    <div class="card" id="clientOrdersCard">
+      <h2>📥 Comenzi de la clienți <span id="coNewBadge" style="display:none;font-size:12px;font-weight:700;color:#92600a;background:#fef3c7;padding:2px 9px;border-radius:20px;vertical-align:middle">0 noi</span></h2>
+      <p class="hint" style="margin-top:0">Comenzile plasate de clienți în portal. Încarcă-le în coș ca să generezi lista de cules.</p>
+      <button class="main ghost" id="coRefresh" style="margin-bottom:8px">🔄 Reîmprospătează</button>
+      <label class="perlvl-toggle" style="margin-bottom:8px"><input type="checkbox" id="coShowAll"> Arată și comenzile rezolvate</label>
+      <div id="clientOrdersList"><p class="hint" style="margin:0">Se încarcă…</p></div>
     </div>
     <div class="card">
       <h2>Coșul comenzii</h2>
@@ -3976,6 +4000,46 @@ function initPick(){
     pickInited=true;
   }
   renderPicking(lastPicks);
+  loadClientOrders();
+}
+// ---- comenzi primite de la clienti (portal) ----
+function loadClientOrders(){
+  const box=$('clientOrdersList'); if(!box) return;
+  const showAll=$('coShowAll') && $('coShowAll').checked;
+  fetch('/api/orders'+(showAll?'':'?status=nou')).then(r=>r.json()).then(d=>{
+    const orders=(d&&d.orders)||[];
+    const nNew=orders.filter(o=>o.status==='nou').length;
+    { const b=$('coNewBadge'); if(b){ b.style.display=nNew?'':'none'; b.textContent=nNew+' noi'; } }
+    if(!orders.length){ box.innerHTML='<p class="hint" style="margin:0">Nicio comandă'+(showAll?'':' nouă')+' de la clienți.</p>'; return; }
+    box.innerHTML='';
+    orders.forEach(o=>{
+      const card=document.createElement('div'); card.style.cssText='border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px;margin-bottom:8px';
+      const badge=o.status==='rezolvat'?'<span style="font-size:11px;font-weight:700;color:#166534;background:#dcfce7;padding:2px 9px;border-radius:20px">✓ rezolvată</span>':'<span style="font-size:11px;font-weight:700;color:#92600a;background:#fef3c7;padding:2px 9px;border-radius:20px">● nouă</span>';
+      const items=(o.items||[]).map(it=>esc(it.prod)+' × '+it.qty).join(', ');
+      card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px"><b>#'+o.id+' · 🔑 '+esc(o.client)+'</b>'+badge+'</div>'
+        +'<div style="font-size:13px;color:#5c6b73">'+items+'</div>'
+        +(o.note?'<div style="font-size:12px;color:#8a979d;font-style:italic;margin-top:3px">„'+esc(o.note)+'”</div>':'');
+      const actions=document.createElement('div'); actions.style.cssText='display:flex;gap:8px;margin-top:8px;flex-wrap:wrap';
+      const load=document.createElement('button'); load.className='addr'; load.style.cssText='margin:0;width:auto;padding:7px 12px'; load.textContent='➕ Încarcă în coș';
+      load.addEventListener('click',()=>loadOrderToCart(o));
+      actions.appendChild(load);
+      if(!window.__readonly){
+        const done=document.createElement('button'); done.className='addr'; done.style.cssText='margin:0;width:auto;padding:7px 12px';
+        done.textContent=o.status==='rezolvat'?'↩ Redeschide':'✓ Marchează rezolvată';
+        done.addEventListener('click',async ()=>{ const ns=o.status==='rezolvat'?'nou':'rezolvat'; const r=await fetch('/api/orders/'+o.id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:ns})}); if(r.ok) loadClientOrders(); });
+        actions.appendChild(done);
+      }
+      card.appendChild(actions); box.appendChild(card);
+    });
+  }).catch(()=>{ box.innerHTML='<p class="hint" style="margin:0">Eroare la încărcare.</p>'; });
+}
+function loadOrderToCart(o){
+  saveActiveFromUI();
+  const ord=newOrderObj('Client '+o.client+' #'+o.id); orders.push(ord); activeId=ord.id;
+  $('orderName').value=ord.name; itemsToRows(ord.items); renderOrderList(); savePickOrders();
+  (o.items||[]).forEach(it=>addPickItem(it.prod, it.qty)); saveActiveFromUI();
+  $('pickStatus').textContent='Comanda #'+o.id+' de la „'+o.client+'” a fost încărcată în coș.';
+  try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
 }
 // citeste comanda din randuri (produse cu cantitati), unind duplicatele
 function readOrder(){
@@ -4080,6 +4144,8 @@ $('pickConfirm').addEventListener('click', confirmPicking);
 $('pickScan').addEventListener('click', ()=>openScanner('pick'));
 $('pickChooserAdd').addEventListener('click', applyPickChooser);
 $('pickChooserClose').addEventListener('click', closePickChooser);
+{ const cr=$('coRefresh'); if(cr) cr.addEventListener('click', loadClientOrders); }
+{ const cs=$('coShowAll'); if(cs) cs.addEventListener('change', loadClientOrders); }
 
 // ---------- JURNAL DE ACTIVITATE (depozit / platforma) ----------
 let logCat='depozit';
@@ -4540,6 +4606,8 @@ initApp();
     const isAdm=(role==='admin'||role==='master');
     const addCard=$('addUserCard'); if(addCard) addCard.style.display=isAdm?'':'none';
     const coCard=$('companyCard'); if(coCard) coCard.style.display=isAdm?'':'none';
+    { const cc=$('clientsCard'); if(cc) cc.style.display=isAdm?'':'none'; }
+    { const cw=$('clientsWrap'); if(cw) cw.style.display=isAdm?'':'none'; }
     const uh=$('usersHint'); if(uh&&role!=='admin'&&role!=='master') uh.textContent='Lista conturilor. Doar administratorii pot adăuga sau șterge utilizatori.';
   }
   async function initAuth(){
@@ -4580,7 +4648,7 @@ initApp();
   // ---- tab utilizatori ----
   const usersTab = document.querySelector('.tab[data-v="users"]');
   $('btnUsers').addEventListener('click', e=>{ e.preventDefault(); if(usersTab) usersTab.click(); });
-  if(usersTab) usersTab.addEventListener('click', ()=>{ $('usersErr').textContent=''; loadUsers(); loadCompany(); });
+  if(usersTab) usersTab.addEventListener('click', ()=>{ $('usersErr').textContent=''; loadUsers(); loadCompany(); if(window.__isAdmin){ loadCatalog(); loadClients(); } });
 
   async function loadCompany(){
     if(window.__role!=='admin') return;
@@ -4674,6 +4742,76 @@ initApp();
     if(!r.ok){ err.textContent = d.error||'Eroare.'; return; }
     $('newUid').value=''; $('newPwd').value=''; loadUsers();
   });
+
+  // ---- CLIENTI (portal): catalog produse, adaugare, listare ----
+  let CATALOG=[]; // [{produs, cod, total}]
+  async function loadCatalog(){
+    try{ const d=await (await fetch('/api/products')).json(); CATALOG=(d&&d.products)||[]; renderCatalogPicker($('cliProdPick'), $('cliProdSearch'), cliPre); }catch(e){}
+  }
+  // deseneaza o lista de checkbox-uri cu produsele; `pre` = Set cu produsele bifate
+  function renderCatalogPicker(box, searchInput, pre){
+    if(!box) return;
+    const draw=()=>{
+      const q=((searchInput&&searchInput.value)||'').trim().toLowerCase();
+      const list=CATALOG.filter(p=> !q || p.produs.toLowerCase().indexOf(q)>=0 || (p.cod||'').toLowerCase().indexOf(q)>=0);
+      if(!CATALOG.length){ box.innerHTML='<p class="hint" style="margin:0">Nu ai produse în inventar încă. Adaugă produse în Inventar, apoi le poți aloca.</p>'; return; }
+      box.innerHTML = list.map(p=>{
+        const v=esc(p.produs);
+        return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 2px"><input type="checkbox" class="cli-ck" value="'+v+'" '+(pre.has(p.produs)?'checked':'')+'><span><b>'+v+'</b>'+(p.cod?' <span style="color:#94a3b8">('+esc(p.cod)+')</span>':'')+' <span style="color:#94a3b8">· '+p.total+' buc</span></span></label>';
+      }).join('') || '<p class="hint" style="margin:0">Niciun produs găsit.</p>';
+      // pastreaza bifele existente cand se filtreaza
+      box.querySelectorAll('.cli-ck').forEach(ck=>ck.addEventListener('change',()=>{ if(ck.checked) pre.add(ck.value); else pre.delete(ck.value); }));
+    };
+    if(searchInput && !searchInput._wired){ searchInput._wired=true; searchInput.addEventListener('input',draw); }
+    draw();
+  }
+  const cliPre=new Set();
+  $('cliAdd') && $('cliAdd').addEventListener('click', async ()=>{
+    const err=$('cliErr'); err.textContent='';
+    const id=$('cliUid').value.trim(), password=$('cliPwd').value;
+    const products=[...cliPre];
+    if(!id||!password){ err.textContent='Completează id și parolă.'; return; }
+    const r=await fetch('/api/clients',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password,products})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ err.textContent=d.error||'Eroare.'; return; }
+    $('cliUid').value=''; $('cliPwd').value=''; cliPre.clear(); if($('cliProdSearch')) $('cliProdSearch').value=''; renderCatalogPicker($('cliProdPick'),$('cliProdSearch'),cliPre); loadClients();
+  });
+  // re-wire picker-ul pentru client nou ca sa foloseasca setul cliPre
+  function refreshNewClientPicker(){ renderCatalogPicker($('cliProdPick'),$('cliProdSearch'),cliPre); }
+
+  async function loadClients(){
+    const box=$('clientsList'); if(!box) return;
+    try{
+      const d=await (await fetch('/api/clients')).json();
+      const clients=(d&&d.clients)||[];
+      { const c=$('clientsCount'); if(c) c.textContent=clients.length; }
+      if(!clients.length){ box.innerHTML='<p class="sub" style="margin:0">Niciun client încă. Adaugă unul din stânga.</p>'; return; }
+      box.innerHTML='';
+      clients.forEach(cl=>{
+        const wrap=document.createElement('div'); wrap.style.cssText='border:1px solid #e2e8f0;border-radius:8px;overflow:hidden';
+        const row=document.createElement('div'); row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 11px';
+        row.innerHTML='<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">🔑 <b>'+esc(cl.id)+'</b> <span style="font-size:11px;color:#94a3b8">'+(cl.products||[]).length+' produse alocate</span></span>';
+        const act=document.createElement('span'); act.style.cssText='display:flex;gap:12px;white-space:nowrap';
+        const edit=document.createElement('a'); edit.href='#'; edit.textContent='produse'; edit.style.cssText='color:#3a721c;text-decoration:none;font-size:13px';
+        const del=document.createElement('a'); del.href='#'; del.textContent='șterge'; del.style.cssText='color:#dc2626;text-decoration:none;font-size:13px';
+        const ed=document.createElement('div'); ed.style.cssText='display:none;padding:10px 11px;border-top:1px solid #e2e8f0;background:#f8fafc';
+        const pre=new Set(cl.products||[]);
+        const srch=document.createElement('input'); srch.placeholder='🔎 caută produs…'; srch.style.cssText='width:100%;padding:8px 10px;border:1px solid #d5ddd6;border-radius:8px;margin-bottom:6px;font-size:13px';
+        const pick=document.createElement('div'); pick.style.cssText='max-height:180px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px;background:#fff';
+        const save=document.createElement('button'); save.className='main'; save.style.cssText='width:auto;padding:8px 14px;margin-top:10px'; save.textContent='Salvează produsele';
+        ed.appendChild(srch); ed.appendChild(pick); ed.appendChild(save);
+        edit.addEventListener('click',e=>{ e.preventDefault(); const open=ed.style.display==='none'; ed.style.display=open?'block':'none'; if(open) renderCatalogPicker(pick,srch,pre); });
+        save.addEventListener('click', async ()=>{
+          save.disabled=true; save.textContent='Se salvează…';
+          const r=await fetch('/api/clients/'+encodeURIComponent(cl.id)+'/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({products:[...pre]})});
+          save.disabled=false; save.textContent='Salvează produsele';
+          if(r.ok){ ed.style.display='none'; loadClients(); }
+        });
+        del.addEventListener('click', async e=>{ e.preventDefault(); if(!confirm('Ștergi clientul „'+cl.id+'”?')) return; const r=await fetch('/api/clients/'+encodeURIComponent(cl.id),{method:'DELETE'}); if(r.ok) loadClients(); });
+        act.appendChild(edit); act.appendChild(del); row.appendChild(act); wrap.appendChild(row); wrap.appendChild(ed); box.appendChild(wrap);
+      });
+    }catch(e){ box.innerHTML='<p class="sub" style="margin:0">Eroare la încărcare.</p>'; }
+  }
 })();
 </script>
 </body>

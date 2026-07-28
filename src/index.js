@@ -262,6 +262,48 @@ async function getInventory(env, tenant) {
   return inv;
 }
 
+// ---- clienti (portal) + produse alocate + comenzi ----
+let clientsReady = false;
+async function ensureClients(env) {
+  if (clientsReady) return;
+  try { await env.DB.prepare('ALTER TABLE users ADD COLUMN products TEXT').run(); } catch (e) { /* exista deja */ }
+  try { await env.DB.prepare("CREATE TABLE IF NOT EXISTS client_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant TEXT NOT NULL, client TEXT NOT NULL, items TEXT NOT NULL, note TEXT, status TEXT NOT NULL DEFAULT 'nou', created_at INTEGER NOT NULL)").run(); } catch (e) {}
+  clientsReady = true;
+}
+function parseProducts(v) {
+  if (!v) return [];
+  try { const a = JSON.parse(v); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch (e) { return []; }
+}
+// produsele distincte din inventarul firmei (cu total pe stoc), pentru alocare / catalog
+function catalogFromInventory(inv) {
+  const map = new Map();
+  for (const code of Object.keys(inv)) for (const it of inv[code]) {
+    const n = String(it.produs || '').trim(); if (!n) continue;
+    const k = n.toLowerCase(); const q = +it.cant || 0;
+    if (!map.has(k)) map.set(k, { produs: n, cod: it.cod || '', total: 0 });
+    map.get(k).total += q;
+  }
+  return [...map.values()].sort((a, b) => a.produs.localeCompare(b.produs));
+}
+// stocul detaliat pentru o multime de produse (nume normalizate) — total + loturi FIFO pe locatii
+function stockForProducts(inv, assigned) {
+  const assignedSet = new Set(assigned.map(s => s.toLowerCase()));
+  const map = new Map();
+  for (const code of Object.keys(inv)) for (const it of inv[code]) {
+    const name = String(it.produs || '');
+    if (!assignedSet.has(name.toLowerCase())) continue;
+    const k = name.toLowerCase();
+    if (!map.has(k)) map.set(k, { produs: name, cod: it.cod || '', total: 0, batches: [] });
+    const e = map.get(k); const q = +it.cant || 0;
+    e.total += q;
+    e.batches.push({ code, cod: it.cod || '', data: it.data || '', cant: q });
+  }
+  for (const e of map.values()) e.batches.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  // include si produsele alocate care nu au stoc (0)
+  for (const name of assigned) { if (!map.has(name.toLowerCase())) map.set(name.toLowerCase(), { produs: name, cod: '', total: 0, batches: [] }); }
+  return [...map.values()].sort((a, b) => a.produs.localeCompare(b.produs));
+}
+
 // ================================================================
 export default {
   async fetch(req, env) {
@@ -272,7 +314,7 @@ export default {
 
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
-    if (p.startsWith('/api/')) { await ensureRole(env); await ensureTabs(env); await ensureTenancy(env); }
+    if (p.startsWith('/api/')) { await ensureRole(env); await ensureTabs(env); await ensureTenancy(env); await ensureClients(env); }
 
     // ---------- rute publice de auth ----------
     if (p === '/api/auth-status' && method === 'GET') {
@@ -368,12 +410,120 @@ export default {
     const myRole = session ? await getRole(env, session.sub) : null;
     const tid = session ? (session.t || await getUserTenant(env, session.sub)) : null;
     const adminish = (myRole === 'admin' || myRole === 'master'); // master = admin + platforma
+    const isClient = myRole === 'client';
+
+    // conturile de client au acces DOAR la portalul lor (/api/client/*) — nimic din aplicatia de depozit
+    if (isClient && p.startsWith('/api/') && !p.startsWith('/api/client/')) {
+      return json({ error: 'Cont de client — acces doar la portal.' }, 403);
+    }
+
+    // ---------- PORTAL CLIENT (stoc + comenzi) ----------
+    if (p.startsWith('/api/client/')) {
+      if (!session) return json({ error: 'Neautentificat.' }, 401);
+      if (!isClient) return json({ error: 'Doar conturi de client.' }, 403);
+      const meRow = await env.DB.prepare('SELECT products FROM users WHERE id = ?1').bind(session.sub).first();
+      const assigned = parseProducts(meRow && meRow.products);
+      const assignedSet = new Set(assigned.map(s => s.toLowerCase()));
+
+      if (p === '/api/client/stock' && method === 'GET') {
+        const inv = await getInventory(env, tid);
+        const products = stockForProducts(inv, assigned);
+        return json({ products, tenantName: await tenantName(env, tid), client: session.sub });
+      }
+      if (p === '/api/client/order' && method === 'POST') {
+        const body = await readBody(req) || {};
+        const items = (Array.isArray(body.items) ? body.items : [])
+          .map(it => ({ prod: String(it.prod || '').slice(0, 120), qty: Math.max(0, Math.round(+it.qty || 0)) }))
+          .filter(it => it.prod && it.qty > 0 && assignedSet.has(it.prod.toLowerCase()));
+        if (!items.length) return json({ error: 'Adaugă cel puțin un produs cu cantitate.' }, 400);
+        const note = String(body.note || '').slice(0, 300);
+        await env.DB.prepare("INSERT INTO client_orders (tenant, client, items, note, status, created_at) VALUES (?1, ?2, ?3, ?4, 'nou', ?5)").bind(tid, session.sub, JSON.stringify(items), note, Date.now()).run();
+        await logAct(env, tid, session.sub, 'Client a plasat o comandă (' + items.length + ' produse)', 'depozit');
+        return json({ ok: true });
+      }
+      if (p === '/api/client/orders' && method === 'GET') {
+        const rows = (await env.DB.prepare('SELECT id, items, note, status, created_at FROM client_orders WHERE tenant = ?1 AND client = ?2 ORDER BY id DESC LIMIT 100').bind(tid, session.sub).all()).results || [];
+        return json({ orders: rows.map(r => ({ id: r.id, items: JSON.parse(r.items), note: r.note, status: r.status, created_at: r.created_at })) });
+      }
+      return json({ error: 'Not found' }, 404);
+    }
+
+    // ---------- CLIENTI: gestionare de admin + catalog + comenzi (pt. depozit) ----------
+    if (p === '/api/products' || p.startsWith('/api/clients') || p.startsWith('/api/orders')) {
+      if (!session) return json({ error: 'Neautentificat.' }, 401);
+
+      // catalog de produse (din inventar) — pt. alocare la client si pt. UI
+      if (p === '/api/products' && method === 'GET') {
+        return json({ products: catalogFromInventory(await getInventory(env, tid)) });
+      }
+      if (p === '/api/clients' && method === 'GET') {
+        if (!adminish) return json({ error: 'Doar administratorii.' }, 403);
+        const rows = (await env.DB.prepare("SELECT id, created_at, products FROM users WHERE tenant = ?1 AND role = 'client' ORDER BY created_at").bind(tid).all()).results || [];
+        return json({ clients: rows.map(r => ({ id: r.id, created_at: r.created_at, products: parseProducts(r.products) })) });
+      }
+      if (p === '/api/clients' && method === 'POST') {
+        if (!adminish) return json({ error: 'Doar administratorii pot adăuga clienți.' }, 403);
+        const body = await readBody(req) || {};
+        const uid = String(body.id || '').trim();
+        if (!/^[a-zA-Z0-9._-]{2,40}$/.test(uid)) return json({ error: 'Id client: 2-40 caractere (litere, cifre, . _ -).' }, 400);
+        if (String(body.password || '').length < 4) return json({ error: 'Parola: minim 4 caractere.' }, 400);
+        if (await env.DB.prepare('SELECT id FROM users WHERE id = ?1').bind(uid).first()) return json({ error: 'Acest id e deja folosit. Alege altul.' }, 409);
+        const products = Array.isArray(body.products) ? body.products.map(s => String(s).slice(0, 120)).filter(Boolean) : [];
+        const hash = await hashPassword(String(body.password));
+        await env.DB.prepare('INSERT INTO users (id, pass_hash, created_at, role, tenant, products) VALUES (?1, ?2, ?3, ?4, ?5, ?6)').bind(uid, hash, Date.now(), 'client', tid, JSON.stringify(products)).run();
+        await logAct(env, tid, session.sub, 'A creat clientul „' + uid + '” (' + products.length + ' produse alocate)', 'platforma');
+        return json({ ok: true, id: uid });
+      }
+      const mCliP = p.match(/^\/api\/clients\/(.+)\/products$/);
+      if (mCliP && method === 'POST') {
+        if (!adminish) return json({ error: 'Doar administratorii.' }, 403);
+        const target = decodeURIComponent(mCliP[1]);
+        const u = await env.DB.prepare('SELECT tenant, role FROM users WHERE id = ?1').bind(target).first();
+        if (!u || u.tenant !== tid || u.role !== 'client') return json({ error: 'Client inexistent.' }, 404);
+        const body = await readBody(req) || {};
+        const products = Array.isArray(body.products) ? body.products.map(s => String(s).slice(0, 120)).filter(Boolean) : [];
+        await env.DB.prepare('UPDATE users SET products = ?1 WHERE id = ?2 AND tenant = ?3').bind(JSON.stringify(products), target, tid).run();
+        await logAct(env, tid, session.sub, 'A actualizat produsele clientului „' + target + '”', 'platforma');
+        return json({ ok: true, products });
+      }
+      const mCli = p.match(/^\/api\/clients\/(.+)$/);
+      if (mCli && method === 'DELETE') {
+        if (!adminish) return json({ error: 'Doar administratorii.' }, 403);
+        const target = decodeURIComponent(mCli[1]);
+        const u = await env.DB.prepare('SELECT tenant, role FROM users WHERE id = ?1').bind(target).first();
+        if (!u || u.tenant !== tid || u.role !== 'client') return json({ error: 'Client inexistent.' }, 404);
+        await env.DB.prepare('DELETE FROM users WHERE id = ?1 AND tenant = ?2').bind(target, tid).run();
+        await logAct(env, tid, session.sub, 'A șters clientul „' + target + '”', 'platforma');
+        return json({ ok: true });
+      }
+      // comenzi primite de la clienti (pentru echipa depozitului)
+      if (p === '/api/orders' && method === 'GET') {
+        if (method !== 'GET' && myRole === 'viewer') return json({ error: 'Doar citire.' }, 403);
+        const statusQ = url.searchParams.get('status');
+        let rows;
+        if (statusQ === 'nou' || statusQ === 'rezolvat') rows = (await env.DB.prepare('SELECT id, client, items, note, status, created_at FROM client_orders WHERE tenant = ?1 AND status = ?2 ORDER BY id DESC LIMIT 200').bind(tid, statusQ).all()).results || [];
+        else rows = (await env.DB.prepare('SELECT id, client, items, note, status, created_at FROM client_orders WHERE tenant = ?1 ORDER BY id DESC LIMIT 200').bind(tid).all()).results || [];
+        return json({ orders: rows.map(r => ({ id: r.id, client: r.client, items: JSON.parse(r.items), note: r.note, status: r.status, created_at: r.created_at })) });
+      }
+      const mOrd = p.match(/^\/api\/orders\/(\d+)$/);
+      if (mOrd && method === 'POST') {
+        if (myRole === 'viewer') return json({ error: 'Cont de vizualizare — doar citire.' }, 403);
+        const oid = parseInt(mOrd[1], 10);
+        const body = await readBody(req) || {};
+        const st = body.status === 'rezolvat' ? 'rezolvat' : (body.status === 'nou' ? 'nou' : null);
+        if (!st) return json({ error: 'Status invalid.' }, 400);
+        await env.DB.prepare('UPDATE client_orders SET status = ?1 WHERE id = ?2 AND tenant = ?3').bind(st, oid, tid).run();
+        await logAct(env, tid, session.sub, (st === 'rezolvat' ? 'A rezolvat' : 'A redeschis') + ' comanda client #' + oid, 'depozit');
+        return json({ ok: true });
+      }
+      return json({ error: 'Not found' }, 404);
+    }
 
     // gestionare utilizatori (doar din propria firma)
     if (p === '/api/users') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
       if (method === 'GET') {
-        const { results } = await env.DB.prepare('SELECT id, created_at, role, tabs FROM users WHERE tenant = ?1 ORDER BY created_at').bind(tid).all();
+        const { results } = await env.DB.prepare("SELECT id, created_at, role, tabs FROM users WHERE tenant = ?1 AND role != 'client' ORDER BY created_at").bind(tid).all();
         const users = (results || []).map(u => ({ id: u.id, created_at: u.created_at, role: u.role, tabs: parseTabs(u.tabs) }));
         return json({ users, me: session.sub, myRole, allTabs: TAB_KEYS, tenantName: await tenantName(env, tid) });
       }
@@ -604,12 +754,25 @@ export default {
     }
 
     // ---------- pagini (front controller) ----------
-    if (!session) {
+    const htmlResp = (body) => new Response(body, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, must-revalidate' } });
+
+    if (session) {
+      // clientii primesc DOAR portalul lor, indiferent de path
+      if (isClient) {
+        const cs = await getCompany(env, tid);
+        return htmlResp(clientPage({ tenantName: cs.name || 'Depozit', clientId: session.sub }));
+      }
+      // echipa depozitului -> aplicatia (ca pana acum, pe orice path, inclusiv deep-link ?loc=)
+      return htmlResp(APP_HTML);
+    }
+
+    // vizitator neautentificat
+    if (p === '/login') {
       const setup = (await userCount(env)) === 0;
       return new Response(loginPage(setup), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
-    // autentificat -> serveste aplicatia direct din bundle-ul Worker-ului, fara cache
-    return new Response(APP_HTML, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, must-revalidate' } });
+    // orice alt path public -> landing page (pagina de prezentare)
+    return htmlResp(landingPage());
   },
 };
 
@@ -688,10 +851,307 @@ function loginPage(setup) {
       const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const d=await r.json().catch(()=>({}));
       if(d && d.pending){ okEl.textContent='✓ Cererea a fost trimisă. Vei putea intra cu id-ul și parola alese după ce este aprobată.'; f.reset(); btn.disabled=false; return; }
-      if(r.ok){ location.reload(); return; }
+      if(r.ok){ location.href='/'; return; }
       err.textContent=d.error||'Eroare.'; btn.disabled=false;
     }catch(ex){ err.textContent='Conexiune eșuată.'; btn.disabled=false; }
   });
+</script>
+</body></html>`;
+}
+
+// ---------- LANDING PAGE (pagina de prezentare, publica) ----------
+function landingPage() {
+  return `<!DOCTYPE html>
+<html lang="ro"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warehouse Organizer — organizează-ți depozitul inteligent</title>
+<meta name="description" content="Warehouse Organizer: schema locațiilor, inventar FIFO, etichete QR, scanare Zebra, picking și portal pentru clienți. Totul într-o singură aplicație.">
+<style>
+  *{box-sizing:border-box} html{scroll-behavior:smooth}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1e2b34;background:#f4f6f4;line-height:1.55}
+  a{color:inherit}
+  .btn{display:inline-block;padding:12px 22px;border-radius:11px;font-weight:700;font-size:15px;text-decoration:none;cursor:pointer;border:0;transition:transform .06s,box-shadow .2s}
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:#4a8f24;color:#fff;box-shadow:0 3px 12px rgba(74,143,36,.35)}
+  .btn-primary:hover{background:#3a721c}
+  .btn-ghost{background:#fff;color:#1e2b34;border:1.5px solid #d5ddd6}
+  .btn-ghost:hover{border-color:#4a8f24;color:#3a721c}
+  header.nav{position:sticky;top:0;z-index:10;background:rgba(30,43,52,.97);backdrop-filter:blur(6px);color:#fff}
+  .nav-in{max-width:1080px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:14px 20px;gap:12px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:19px;letter-spacing:.2px}
+  .brand .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#6cb33f,#3a721c);display:flex;align-items:center;justify-content:center;font-size:19px}
+  .brand small{color:#9fb4a3;font-weight:600;font-size:12px;display:block;margin-top:-2px}
+  .hero{max-width:1080px;margin:0 auto;padding:64px 20px 40px;text-align:center}
+  .hero h1{font-size:clamp(30px,5vw,50px);line-height:1.1;margin:0 0 16px;letter-spacing:-.5px}
+  .hero h1 .g{color:#4a8f24}
+  .hero p.lead{font-size:clamp(16px,2.4vw,20px);color:#4b5a62;max-width:640px;margin:0 auto 30px}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .pill{display:inline-block;background:#eaf0e8;color:#3a721c;font-weight:700;font-size:13px;padding:6px 14px;border-radius:20px;margin-bottom:22px}
+  section{max-width:1080px;margin:0 auto;padding:34px 20px}
+  h2.sec{font-size:clamp(23px,3.5vw,32px);text-align:center;margin:0 0 8px;letter-spacing:-.3px}
+  p.sub{text-align:center;color:#5c6b73;max-width:600px;margin:0 auto 32px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .feat{background:#fff;border:1px solid #e2e7e5;border-radius:15px;padding:22px}
+  .feat .ic{font-size:26px;margin-bottom:10px}
+  .feat h3{margin:0 0 6px;font-size:17px}
+  .feat p{margin:0;color:#5c6b73;font-size:14.5px}
+  .split{background:#1e2b34;color:#fff;border-radius:20px;padding:40px 28px;display:grid;grid-template-columns:1.1fr 1fr;gap:30px;align-items:center}
+  .split h2{font-size:clamp(22px,3vw,30px);margin:0 0 12px}
+  .split p{color:#c3d0c8;margin:0 0 18px;font-size:15.5px}
+  .split ul{margin:0 0 22px;padding-left:20px;color:#dbe6df}
+  .split li{margin:7px 0}
+  .mock{background:#0f1a22;border:1px solid #2c3d47;border-radius:14px;padding:16px}
+  .mock .mrow{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:9px;background:#16242d;margin-bottom:8px;font-size:14px}
+  .mock .mrow:last-child{margin-bottom:0}
+  .mock .q{background:#4a8f24;color:#fff;font-weight:700;border-radius:7px;padding:2px 10px;font-size:13px}
+  footer{text-align:center;color:#8a979d;font-size:13px;padding:40px 20px 50px}
+  @media(max-width:720px){ .split{grid-template-columns:1fr;padding:28px 20px} .hero{padding:44px 20px 26px} }
+</style></head><body>
+<header class="nav"><div class="nav-in">
+  <div class="brand"><span class="logo">📦</span><span>Warehouse Organizer<small>organizează-ți depozitul</small></span></div>
+  <a class="btn btn-primary" href="/login">Autentificare</a>
+</div></header>
+
+<div class="hero">
+  <span class="pill">📦 Depozit · Inventar · Picking · Portal clienți</span>
+  <h1>Depozitul tău, <span class="g">organizat inteligent</span></h1>
+  <p class="lead">Schema locațiilor, inventar în timp real cu FIFO, etichete QR, scanare cu aparate Zebra și un portal pentru clienți — totul într-o singură aplicație, partajată cu echipa.</p>
+  <div class="cta">
+    <a class="btn btn-primary" href="/login">Autentificare echipă</a>
+    <a class="btn btn-ghost" href="/login">🔑 Portal clienți</a>
+  </div>
+</div>
+
+<section id="functii">
+  <h2 class="sec">Tot ce-ți trebuie pentru depozit</h2>
+  <p class="sub">De la organizarea rafturilor până la comenzile clienților, într-un singur loc.</p>
+  <div class="grid">
+    <div class="feat"><div class="ic">🗺️</div><h3>Schema locațiilor</h3><p>Vezi rafturile și locațiile pe o hartă interactivă, cu stocul din fiecare poziție.</p></div>
+    <div class="feat"><div class="ic">📥</div><h3>Inventar FIFO</h3><p>Intrări și ieșiri pe loturi, cu ordine „cel mai vechi primul”, ca să nu-ți expire marfa.</p></div>
+    <div class="feat"><div class="ic">🏷️</div><h3>Etichete QR</h3><p>Printezi etichete A5 cu cod QR pentru fiecare locație și le scanezi direct din telefon.</p></div>
+    <div class="feat"><div class="ic">📟</div><h3>Scanare Zebra</h3><p>Aparatele Zebra scanează automat locația și îți arată pe loc stocul și produsele.</p></div>
+    <div class="feat"><div class="ic">🛒</div><h3>Picking / culegere</h3><p>Listă de cules ordonată pe traseu, cu cantitățile de luat din fiecare locație.</p></div>
+    <div class="feat"><div class="ic">🏢</div><h3>Mai multe firme</h3><p>Fiecare firmă are datele ei, complet izolate. Roluri și permisiuni per utilizator.</p></div>
+  </div>
+</section>
+
+<section id="clienti">
+  <div class="split">
+    <div>
+      <h2>Un portal dedicat clienților tăi</h2>
+      <p>Clienții se autentifică și văd în timp real stocul produselor lor — cu detalii pe loturi și locații. Pot plasa comenzi care ajung direct la echipa depozitului.</p>
+      <ul>
+        <li>Vede doar produsele care îi sunt alocate</li>
+        <li>Stoc disponibil, detalii pe loturi (FIFO) și locații</li>
+        <li>Plasează comenzi trimise instant în depozit</li>
+      </ul>
+      <a class="btn btn-primary" href="/login">Intră în portalul de client</a>
+    </div>
+    <div class="mock">
+      <div class="mrow"><span>Cutii carton 60×40</span><span class="q">1 240 buc</span></div>
+      <div class="mrow"><span>Folie stretch 500mm</span><span class="q">86 role</span></div>
+      <div class="mrow"><span>Bandă adezivă 48mm</span><span class="q">320 buc</span></div>
+      <div class="mrow"><span>Paleți EUR</span><span class="q">54 buc</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Warehouse Organizer — organizează-ți depozitul inteligent. &nbsp;·&nbsp; <a href="/login" style="color:#4a8f24;font-weight:600;text-decoration:none">Autentificare</a>
+</footer>
+</body></html>`;
+}
+
+// ---------- PORTAL CLIENT (stoc + comenzi) ----------
+function clientPage(opts) {
+  const he = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const firm = he(opts.tenantName || 'Depozit');
+  const cid = he(opts.clientId || '');
+  return `<!DOCTYPE html>
+<html lang="ro"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portal client — ${firm}</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1e2b34;background:#f4f6f4}
+  header{background:#1e2b34;color:#fff;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px}
+  .brand .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#6cb33f,#3a721c);display:flex;align-items:center;justify-content:center}
+  .brand small{display:block;color:#9fb4a3;font-weight:600;font-size:12px;margin-top:-2px}
+  .who{display:flex;align-items:center;gap:12px;font-size:13px;color:#c3d0c8}
+  .who a{color:#fff;text-decoration:none;background:#33474f;padding:6px 12px;border-radius:8px;font-weight:600}
+  .who a:hover{background:#415862}
+  .tabs{display:flex;gap:6px;background:#eaf0e8;padding:5px;border-radius:12px;margin:16px auto 0;max-width:1060px;width:calc(100% - 32px)}
+  .tab{flex:1;text-align:center;padding:9px;border:0;background:transparent;border-radius:9px;font-weight:700;font-size:14px;cursor:pointer;color:#4b5a62}
+  .tab.active{background:#4a8f24;color:#fff;box-shadow:0 2px 7px rgba(74,143,36,.35)}
+  .wrap{max-width:1060px;margin:16px auto;padding:0 16px;display:grid;grid-template-columns:1fr 340px;gap:16px}
+  @media(max-width:820px){ .wrap{grid-template-columns:1fr} }
+  .card{background:#fff;border:1px solid #e2e7e5;border-radius:14px;padding:16px}
+  h2{font-size:16px;margin:0 0 12px}
+  input,textarea{width:100%;padding:10px 11px;border:1px solid #d5ddd6;border-radius:9px;font-size:15px;font-family:inherit}
+  input:focus,textarea:focus{outline:none;border-color:#4a8f24}
+  .search{margin-bottom:12px}
+  .prod{border:1px solid #e2e7e5;border-radius:11px;margin-bottom:10px;overflow:hidden}
+  .prow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px}
+  .pname{font-weight:700;font-size:15px}
+  .pcod{font-size:12px;color:#8a979d}
+  .pqty{font-weight:800;font-size:18px;color:#3a721c;white-space:nowrap}
+  .pqty small{font-size:12px;color:#8a979d;font-weight:600}
+  .padd{background:#eaf0e8;color:#3a721c;border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap}
+  .padd:hover{background:#dbe7d6}
+  .padd:disabled{opacity:.5;cursor:default}
+  .det{background:#f8faf8;border-top:1px solid #eef2ee;padding:0 14px;max-height:0;overflow:hidden;transition:max-height .2s,padding .2s}
+  .det.open{max-height:360px;overflow:auto;padding:10px 14px}
+  .drow{display:flex;justify-content:space-between;font-size:13px;color:#5c6b73;padding:5px 0;border-bottom:1px dashed #e2e7e5}
+  .drow:last-child{border-bottom:0}
+  .toggle{background:none;border:0;color:#4a8f24;font-size:12px;font-weight:700;cursor:pointer;padding:0}
+  .cart-item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eef2ee}
+  .cart-item .ci-name{flex:1;font-size:14px;font-weight:600}
+  .cart-item input{width:74px;text-align:center}
+  .cart-item .ci-rm{background:none;border:0;color:#dc2626;cursor:pointer;font-size:16px}
+  .main{width:100%;padding:12px;border:0;border-radius:10px;background:#4a8f24;color:#fff;font-weight:700;font-size:15px;cursor:pointer;margin-top:12px}
+  .main:hover{background:#3a721c} .main:disabled{opacity:.55;cursor:default}
+  .empty{color:#8a979d;font-size:14px;text-align:center;padding:20px 0}
+  .ord{border:1px solid #e2e7e5;border-radius:11px;padding:12px 14px;margin-bottom:10px}
+  .ord-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .badge{font-size:11px;font-weight:800;padding:3px 10px;border-radius:20px}
+  .b-nou{background:#fef3c7;color:#92600a} .b-rez{background:#dcfce7;color:#166534}
+  .ord-items{font-size:13px;color:#5c6b73}
+  .status{font-size:13px;margin-top:8px;min-height:18px}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1e2b34;color:#fff;padding:11px 20px;border-radius:11px;font-weight:600;box-shadow:0 6px 22px rgba(0,0,0,.28);opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
+  .hidden{display:none}
+</style></head><body>
+<header>
+  <div class="brand"><span class="logo">📦</span><span>${firm}<small>Portal client · Warehouse Organizer</small></span></div>
+  <div class="who"><span>👤 ${cid}</span><a href="#" id="logout">Ieși</a></div>
+</header>
+<div class="tabs">
+  <button class="tab active" data-t="stoc" type="button">📦 Stoc produse</button>
+  <button class="tab" data-t="comenzi" type="button">🧾 Comenzile mele</button>
+</div>
+
+<div id="viewStoc" class="wrap">
+  <div class="card">
+    <h2>Stocul produselor tale</h2>
+    <input class="search" id="search" placeholder="🔎 Caută produs…">
+    <div id="stockList"><p class="empty">Se încarcă…</p></div>
+  </div>
+  <div class="card" style="align-self:start;position:sticky;top:12px">
+    <h2>🛒 Comanda ta</h2>
+    <div id="cart"><p class="empty">Adaugă produse din stoc.</p></div>
+    <textarea id="note" rows="2" placeholder="Observații (opțional)…" style="margin-top:10px"></textarea>
+    <button class="main" id="send" disabled>Trimite comanda</button>
+    <div class="status" id="orderStatus"></div>
+  </div>
+</div>
+
+<div id="viewComenzi" class="wrap hidden">
+  <div class="card" style="grid-column:1/-1">
+    <h2>Comenzile mele</h2>
+    <div id="ordersList"><p class="empty">Se încarcă…</p></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  var $=function(id){return document.getElementById(id);};
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  var STOCK=[], CART={};
+  // 401 -> inapoi la pagina publica
+  var _f=window.fetch.bind(window);
+  window.fetch=function(){return _f.apply(null,arguments).then(function(r){ if(r.status===401) location.href='/'; return r;});};
+
+  function toast(m){ var t=$('toast'); t.textContent=m; t.style.opacity='1'; clearTimeout(t._h); t._h=setTimeout(function(){t.style.opacity='0';},1900); }
+  function fmtDate(ts){ if(!ts) return ''; var d=new Date(ts); return d.toLocaleDateString('ro-RO')+' '+d.toLocaleTimeString('ro-RO',{hour:'2-digit',minute:'2-digit'}); }
+
+  // ---- tabs ----
+  [].forEach.call(document.querySelectorAll('.tab'),function(b){ b.addEventListener('click',function(){
+    [].forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.remove('active');}); b.classList.add('active');
+    var t=b.getAttribute('data-t');
+    $('viewStoc').classList.toggle('hidden',t!=='stoc');
+    $('viewComenzi').classList.toggle('hidden',t!=='comenzi');
+    if(t==='comenzi') loadOrders();
+  });});
+
+  // ---- stoc ----
+  function loadStock(){
+    fetch('/api/client/stock').then(function(r){return r.json();}).then(function(d){
+      STOCK=(d&&d.products)||[]; renderStock();
+    }).catch(function(){ $('stockList').innerHTML='<p class="empty">Eroare la încărcare.</p>'; });
+  }
+  function renderStock(){
+    var q=($('search').value||'').trim().toLowerCase();
+    var list=STOCK.filter(function(p){ return !q || p.produs.toLowerCase().indexOf(q)>=0 || (p.cod||'').toLowerCase().indexOf(q)>=0; });
+    if(!list.length){ $('stockList').innerHTML='<p class="empty">'+(STOCK.length?'Niciun produs găsit.':'Nu ai încă produse alocate. Contactează depozitul.')+'</p>'; return; }
+    var html='';
+    list.forEach(function(p,idx){
+      var i=STOCK.indexOf(p);
+      var batches=(p.batches||[]).map(function(b){
+        return '<div class="drow"><span>📍 '+esc(b.code)+(b.data?' · lot '+esc(b.data):'')+'</span><span>'+b.cant+' buc</span></div>';
+      }).join('')||'<div class="drow"><span>Fără stoc pe locații</span><span>0</span></div>';
+      html+='<div class="prod">'
+        +'<div class="prow">'
+          +'<div><div class="pname">'+esc(p.produs)+'</div>'+(p.cod?'<div class="pcod">cod: '+esc(p.cod)+'</div>':'')
+            +' <button class="toggle" data-tg="'+i+'">detalii pe loturi ▾</button></div>'
+          +'<div style="display:flex;align-items:center;gap:12px">'
+            +'<div class="pqty">'+p.total+' <small>buc</small></div>'
+            +'<button class="padd" data-add="'+i+'"'+(p.total>0?'':' disabled')+'>+ comandă</button>'
+          +'</div>'
+        +'</div>'
+        +'<div class="det" id="det'+i+'">'+batches+'</div>'
+      +'</div>';
+    });
+    $('stockList').innerHTML=html;
+    [].forEach.call($('stockList').querySelectorAll('[data-add]'),function(b){ b.addEventListener('click',function(){ addToCart(STOCK[+b.getAttribute('data-add')]); }); });
+    [].forEach.call($('stockList').querySelectorAll('[data-tg]'),function(b){ b.addEventListener('click',function(){ var d=$('det'+b.getAttribute('data-tg')); d.classList.toggle('open'); b.textContent=d.classList.contains('open')?'ascunde loturile ▴':'detalii pe loturi ▾'; }); });
+  }
+  $('search').addEventListener('input',renderStock);
+
+  // ---- cos ----
+  function addToCart(p){ if(!p) return; var k=p.produs.toLowerCase(); if(!CART[k]) CART[k]={prod:p.produs,qty:1,max:p.total}; else CART[k].qty++; renderCart(); toast('Adăugat: '+p.produs); }
+  function renderCart(){
+    var keys=Object.keys(CART);
+    if(!keys.length){ $('cart').innerHTML='<p class="empty">Adaugă produse din stoc.</p>'; $('send').disabled=true; return; }
+    var html='';
+    keys.forEach(function(k){ var c=CART[k];
+      html+='<div class="cart-item"><span class="ci-name">'+esc(c.prod)+'</span>'
+        +'<input type="number" min="1" value="'+c.qty+'" data-q="'+esc(k)+'">'
+        +'<button class="ci-rm" data-rm="'+esc(k)+'" title="Scoate">✕</button></div>';
+    });
+    $('cart').innerHTML=html; $('send').disabled=false;
+    [].forEach.call($('cart').querySelectorAll('[data-q]'),function(inp){ inp.addEventListener('input',function(){ var k=inp.getAttribute('data-q'); var v=Math.max(1,Math.round(+inp.value||1)); CART[k].qty=v; }); });
+    [].forEach.call($('cart').querySelectorAll('[data-rm]'),function(b){ b.addEventListener('click',function(){ delete CART[b.getAttribute('data-rm')]; renderCart(); }); });
+  }
+  $('send').addEventListener('click',function(){
+    var items=Object.keys(CART).map(function(k){return {prod:CART[k].prod,qty:CART[k].qty};});
+    if(!items.length) return;
+    $('send').disabled=true; $('orderStatus').textContent='Se trimite…';
+    fetch('/api/client/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items,note:$('note').value})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(res.ok){ CART={}; $('note').value=''; renderCart(); $('orderStatus').textContent=''; toast('✓ Comanda a fost trimisă!'); loadOrders(); }
+        else { $('orderStatus').style.color='#dc2626'; $('orderStatus').textContent=(res.d&&res.d.error)||'Eroare.'; $('send').disabled=false; }
+      }).catch(function(){ $('orderStatus').textContent='Conexiune eșuată.'; $('send').disabled=false; });
+  });
+
+  // ---- comenzile mele ----
+  function loadOrders(){
+    fetch('/api/client/orders').then(function(r){return r.json();}).then(function(d){
+      var orders=(d&&d.orders)||[];
+      if(!orders.length){ $('ordersList').innerHTML='<p class="empty">Nu ai încă nicio comandă.</p>'; return; }
+      $('ordersList').innerHTML=orders.map(function(o){
+        var badge=o.status==='rezolvat'?'<span class="badge b-rez">✓ Rezolvată</span>':'<span class="badge b-nou">● Nouă</span>';
+        var items=(o.items||[]).map(function(it){return esc(it.prod)+' × '+it.qty;}).join(', ');
+        return '<div class="ord"><div class="ord-head"><b>Comanda #'+o.id+'</b>'+badge+'</div>'
+          +'<div class="ord-items">'+items+'</div>'
+          +(o.note?'<div class="ord-items" style="margin-top:4px;font-style:italic">„'+esc(o.note)+'”</div>':'')
+          +'<div style="font-size:12px;color:#8a979d;margin-top:6px">'+fmtDate(o.created_at)+'</div></div>';
+      }).join('');
+    }).catch(function(){ $('ordersList').innerHTML='<p class="empty">Eroare la încărcare.</p>'; });
+  }
+
+  $('logout').addEventListener('click',function(e){ e.preventDefault(); fetch('/api/logout',{method:'POST'}).then(function(){location.href='/';}).catch(function(){location.href='/';}); });
+
+  loadStock();
 </script>
 </body></html>`;
 }
