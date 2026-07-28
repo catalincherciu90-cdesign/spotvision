@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
   role       TEXT NOT NULL DEFAULT 'operator',  -- 'admin' | 'operator' | 'viewer' | 'master' | 'client'
   tabs       TEXT,                               -- JSON cu taburile permise; NULL = toate
   tenant     TEXT,                               -- firma (gestiune) careia ii apartine
-  products   TEXT                                -- (client) JSON cu produsele alocate ce le poate vedea
+  products   TEXT,                               -- (client) JSON cu produsele alocate ce le poate vedea
+  login_token TEXT                               -- token pt. logare automata prin QR (scanabil cu Zebra)
 );
 
 -- Comenzi plasate de clienti prin portal (ajung la echipa depozitului).
