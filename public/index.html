@@ -585,6 +585,18 @@
       <h2>Scanează</h2>
       <p class="hint" style="margin-top:0">Scanează codul QR de pe o etichetă cu camera telefonului și vezi imediat stocul și produsele de pe acea locație.</p>
       <button class="main alt" id="btnScan">📷 Scanează etichetă</button>
+      <p class="hint" style="margin-top:12px"><b>📟 Scaner hardware (Zebra)</b> — funcționează automat, fără buton. Scanează o etichetă cu aparatul Zebra oriunde în aplicație și se deschide locația; pe pagina <b>Picking</b> se deschid produsele din locație. Aparatul trebuie setat pe mod <b>tastatură (keyboard wedge / HID)</b> cu sufix <b>Enter</b> — vezi pașii de configurare mai jos.</p>
+      <details style="margin-top:6px"><summary class="hint" style="cursor:pointer">Cum configurez aparatul Zebra?</summary>
+        <div class="hint" style="margin-top:6px;line-height:1.55">
+          <b>Terminale Android Zebra (TC/MC/WT cu DataWedge):</b><br>
+          1. Deschide <b>DataWedge</b> → profilul aplicației (sau profilul implicit „Profile0").<br>
+          2. <b>Keystroke Output</b> → activat (ON).<br>
+          3. <b>Basic data formatting</b> → <b>Send ENTER key</b> = activat (sufix Enter).<br>
+          4. <b>Barcode input</b> → activat; lasă simbologiile QR Code și Code 39 pornite.<br><br>
+          <b>Scanere corded/Bluetooth Zebra (DS/LI/RFD):</b> scanează din manual codul <b>„HID Keyboard"</b> și codul <b>„Add Enter/CR suffix"</b> (Enter la final). Apoi codul apare direct în aplicație.<br><br>
+          <b>Recomandare cod:</b> pentru scanere laser 1D folosește tipul <b>Code 39</b> la etichete; imagerele Zebra citesc și QR, și Code 39.
+        </div>
+      </details>
     </div>
   </div>
   <div>
@@ -3840,6 +3852,45 @@ function closeScanner(){
   const v=$('scanVideo'); if(v) v.srcObject=null;
   $('scanModal').style.display='none';
 }
+
+// ---------- SCANER HARDWARE (Zebra / keyboard-wedge) ----------
+// Aparatele Zebra (terminale Android cu DataWedge sau scanere corded/Bluetooth in mod HID)
+// "tasteaza" codul scanat urmat de Enter. Detectam rafala rapida de taste si rutam scanarea
+// automat: pe Picking deschidem produsele din locatie, altfel deschidem locatia.
+function scanToast(msg){
+  let t=$('scanToast');
+  if(!t){ t=document.createElement('div'); t.id='scanToast';
+    t.style.cssText='position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--brand-navy,#1e2b34);color:#fff;padding:10px 18px;border-radius:11px;font-weight:600;font-size:15px;box-shadow:0 6px 22px rgba(0,0,0,.28);z-index:9999;opacity:0;transition:opacity .18s;pointer-events:none';
+    document.body.appendChild(t); }
+  t.textContent=msg; t.style.opacity='1';
+  clearTimeout(t._h); t._h=setTimeout(()=>{ t.style.opacity='0'; }, 1800);
+}
+function onHardwareScan(raw){
+  const code=parseScanCode(raw); if(!code) return;
+  scanToast('📟 Scanat: '+code);
+  const vp=$('viewPick');
+  if(vp && !vp.hidden) pickScanResult(raw); else goToLoc(raw);
+}
+(function(){
+  let buf='', lastT=0;
+  const GAP=120;   // ms peste care consideram ca e tastare umana (reset buffer)
+  const MINLEN=3;  // lungime minima a unui cod valid
+  const editable=el=>{ if(!el) return false; const t=(el.tagName||'').toUpperCase(); return t==='INPUT'||t==='TEXTAREA'||t==='SELECT'||el.isContentEditable; };
+  document.addEventListener('keydown', function(e){
+    if(e.ctrlKey||e.altKey||e.metaKey) return;
+    const sm=$('scanModal'); if(sm && sm.style.display==='flex') return; // scanerul-camera are logica lui
+    const now=e.timeStamp||0;
+    if(now-lastT>GAP) buf='';   // pauza mare intre taste => om care scrie, reincepe
+    lastT=now;
+    if(e.key==='Enter'){
+      const code=buf; buf='';
+      // rafala rapida + lungime minima + niciun camp editabil focusat => scanare hardware
+      if(code.length>=MINLEN && !editable(document.activeElement)){ e.preventDefault(); onHardwareScan(code); }
+      return;
+    }
+    if(e.key && e.key.length===1) buf+=e.key;
+  }, true);
+})();
 
 // ---------- PICKING (culegere comanda, FIFO) ----------
 let lastPicks=null;   // ultima lista generata (pentru confirmare/printare)
