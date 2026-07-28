@@ -319,7 +319,7 @@
     </div>
     <div class="card" id="clientsCard" style="display:none">
       <h2>🔑 Clienți (portal)</h2>
-      <p class="hint" style="margin-top:0;margin-bottom:12px">Conturi de client care se loghează în portal și văd <b>doar produsele alocate</b> lor, cu stoc și posibilitatea de a plasa comenzi.</p>
+      <p class="hint" style="margin-top:0;margin-bottom:12px">Conturi de client care se loghează în portal și <b>văd doar stocul produselor alocate</b> lor (doar vizualizare, cu detalii pe loturi și locații).</p>
       <div class="field"><label>Id client nou</label><input id="cliUid" placeholder="ex: client_metro"></div>
       <div class="field"><label>Parolă</label><input id="cliPwd" type="password" placeholder="parolă"></div>
       <div class="field"><label>Produse alocate <span style="font-weight:400;color:#94a3b8">(bifează ce poate vedea)</span></label>
@@ -631,13 +631,6 @@
       <h2>Comenzi</h2>
       <div id="orderList"></div>
       <button class="addr" id="orderAdd">➕ Comandă nouă</button>
-    </div>
-    <div class="card" id="clientOrdersCard">
-      <h2>📥 Comenzi de la clienți <span id="coNewBadge" style="display:none;font-size:12px;font-weight:700;color:#92600a;background:#fef3c7;padding:2px 9px;border-radius:20px;vertical-align:middle">0 noi</span></h2>
-      <p class="hint" style="margin-top:0">Comenzile plasate de clienți în portal. Încarcă-le în coș ca să generezi lista de cules.</p>
-      <button class="main ghost" id="coRefresh" style="margin-bottom:8px">🔄 Reîmprospătează</button>
-      <label class="perlvl-toggle" style="margin-bottom:8px"><input type="checkbox" id="coShowAll"> Arată și comenzile rezolvate</label>
-      <div id="clientOrdersList"><p class="hint" style="margin:0">Se încarcă…</p></div>
     </div>
     <div class="card">
       <h2>Coșul comenzii</h2>
@@ -4000,46 +3993,6 @@ function initPick(){
     pickInited=true;
   }
   renderPicking(lastPicks);
-  loadClientOrders();
-}
-// ---- comenzi primite de la clienti (portal) ----
-function loadClientOrders(){
-  const box=$('clientOrdersList'); if(!box) return;
-  const showAll=$('coShowAll') && $('coShowAll').checked;
-  fetch('/api/orders'+(showAll?'':'?status=nou')).then(r=>r.json()).then(d=>{
-    const orders=(d&&d.orders)||[];
-    const nNew=orders.filter(o=>o.status==='nou').length;
-    { const b=$('coNewBadge'); if(b){ b.style.display=nNew?'':'none'; b.textContent=nNew+' noi'; } }
-    if(!orders.length){ box.innerHTML='<p class="hint" style="margin:0">Nicio comandă'+(showAll?'':' nouă')+' de la clienți.</p>'; return; }
-    box.innerHTML='';
-    orders.forEach(o=>{
-      const card=document.createElement('div'); card.style.cssText='border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px;margin-bottom:8px';
-      const badge=o.status==='rezolvat'?'<span style="font-size:11px;font-weight:700;color:#166534;background:#dcfce7;padding:2px 9px;border-radius:20px">✓ rezolvată</span>':'<span style="font-size:11px;font-weight:700;color:#92600a;background:#fef3c7;padding:2px 9px;border-radius:20px">● nouă</span>';
-      const items=(o.items||[]).map(it=>esc(it.prod)+' × '+it.qty).join(', ');
-      card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px"><b>#'+o.id+' · 🔑 '+esc(o.client)+'</b>'+badge+'</div>'
-        +'<div style="font-size:13px;color:#5c6b73">'+items+'</div>'
-        +(o.note?'<div style="font-size:12px;color:#8a979d;font-style:italic;margin-top:3px">„'+esc(o.note)+'”</div>':'');
-      const actions=document.createElement('div'); actions.style.cssText='display:flex;gap:8px;margin-top:8px;flex-wrap:wrap';
-      const load=document.createElement('button'); load.className='addr'; load.style.cssText='margin:0;width:auto;padding:7px 12px'; load.textContent='➕ Încarcă în coș';
-      load.addEventListener('click',()=>loadOrderToCart(o));
-      actions.appendChild(load);
-      if(!window.__readonly){
-        const done=document.createElement('button'); done.className='addr'; done.style.cssText='margin:0;width:auto;padding:7px 12px';
-        done.textContent=o.status==='rezolvat'?'↩ Redeschide':'✓ Marchează rezolvată';
-        done.addEventListener('click',async ()=>{ const ns=o.status==='rezolvat'?'nou':'rezolvat'; const r=await fetch('/api/orders/'+o.id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:ns})}); if(r.ok) loadClientOrders(); });
-        actions.appendChild(done);
-      }
-      card.appendChild(actions); box.appendChild(card);
-    });
-  }).catch(()=>{ box.innerHTML='<p class="hint" style="margin:0">Eroare la încărcare.</p>'; });
-}
-function loadOrderToCart(o){
-  saveActiveFromUI();
-  const ord=newOrderObj('Client '+o.client+' #'+o.id); orders.push(ord); activeId=ord.id;
-  $('orderName').value=ord.name; itemsToRows(ord.items); renderOrderList(); savePickOrders();
-  (o.items||[]).forEach(it=>addPickItem(it.prod, it.qty)); saveActiveFromUI();
-  $('pickStatus').textContent='Comanda #'+o.id+' de la „'+o.client+'” a fost încărcată în coș.';
-  try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
 }
 // citeste comanda din randuri (produse cu cantitati), unind duplicatele
 function readOrder(){
@@ -4144,8 +4097,6 @@ $('pickConfirm').addEventListener('click', confirmPicking);
 $('pickScan').addEventListener('click', ()=>openScanner('pick'));
 $('pickChooserAdd').addEventListener('click', applyPickChooser);
 $('pickChooserClose').addEventListener('click', closePickChooser);
-{ const cr=$('coRefresh'); if(cr) cr.addEventListener('click', loadClientOrders); }
-{ const cs=$('coShowAll'); if(cs) cs.addEventListener('change', loadClientOrders); }
 
 // ---------- JURNAL DE ACTIVITATE (depozit / platforma) ----------
 let logCat='depozit';

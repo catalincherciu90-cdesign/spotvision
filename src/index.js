@@ -430,26 +430,11 @@ export default {
         const products = stockForProducts(inv, assigned);
         return json({ products, tenantName: await tenantName(env, tid), client: session.sub });
       }
-      if (p === '/api/client/order' && method === 'POST') {
-        const body = await readBody(req) || {};
-        const items = (Array.isArray(body.items) ? body.items : [])
-          .map(it => ({ prod: String(it.prod || '').slice(0, 120), qty: Math.max(0, Math.round(+it.qty || 0)) }))
-          .filter(it => it.prod && it.qty > 0 && assignedSet.has(it.prod.toLowerCase()));
-        if (!items.length) return json({ error: 'Adaugă cel puțin un produs cu cantitate.' }, 400);
-        const note = String(body.note || '').slice(0, 300);
-        await env.DB.prepare("INSERT INTO client_orders (tenant, client, items, note, status, created_at) VALUES (?1, ?2, ?3, ?4, 'nou', ?5)").bind(tid, session.sub, JSON.stringify(items), note, Date.now()).run();
-        await logAct(env, tid, session.sub, 'Client a plasat o comandă (' + items.length + ' produse)', 'depozit');
-        return json({ ok: true });
-      }
-      if (p === '/api/client/orders' && method === 'GET') {
-        const rows = (await env.DB.prepare('SELECT id, items, note, status, created_at FROM client_orders WHERE tenant = ?1 AND client = ?2 ORDER BY id DESC LIMIT 100').bind(tid, session.sub).all()).results || [];
-        return json({ orders: rows.map(r => ({ id: r.id, items: JSON.parse(r.items), note: r.note, status: r.status, created_at: r.created_at })) });
-      }
       return json({ error: 'Not found' }, 404);
     }
 
-    // ---------- CLIENTI: gestionare de admin + catalog + comenzi (pt. depozit) ----------
-    if (p === '/api/products' || p.startsWith('/api/clients') || p.startsWith('/api/orders')) {
+    // ---------- CLIENTI: gestionare de admin + catalog produse ----------
+    if (p === '/api/products' || p.startsWith('/api/clients')) {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
 
       // catalog de produse (din inventar) — pt. alocare la client si pt. UI
@@ -494,26 +479,6 @@ export default {
         if (!u || u.tenant !== tid || u.role !== 'client') return json({ error: 'Client inexistent.' }, 404);
         await env.DB.prepare('DELETE FROM users WHERE id = ?1 AND tenant = ?2').bind(target, tid).run();
         await logAct(env, tid, session.sub, 'A șters clientul „' + target + '”', 'platforma');
-        return json({ ok: true });
-      }
-      // comenzi primite de la clienti (pentru echipa depozitului)
-      if (p === '/api/orders' && method === 'GET') {
-        if (method !== 'GET' && myRole === 'viewer') return json({ error: 'Doar citire.' }, 403);
-        const statusQ = url.searchParams.get('status');
-        let rows;
-        if (statusQ === 'nou' || statusQ === 'rezolvat') rows = (await env.DB.prepare('SELECT id, client, items, note, status, created_at FROM client_orders WHERE tenant = ?1 AND status = ?2 ORDER BY id DESC LIMIT 200').bind(tid, statusQ).all()).results || [];
-        else rows = (await env.DB.prepare('SELECT id, client, items, note, status, created_at FROM client_orders WHERE tenant = ?1 ORDER BY id DESC LIMIT 200').bind(tid).all()).results || [];
-        return json({ orders: rows.map(r => ({ id: r.id, client: r.client, items: JSON.parse(r.items), note: r.note, status: r.status, created_at: r.created_at })) });
-      }
-      const mOrd = p.match(/^\/api\/orders\/(\d+)$/);
-      if (mOrd && method === 'POST') {
-        if (myRole === 'viewer') return json({ error: 'Cont de vizualizare — doar citire.' }, 403);
-        const oid = parseInt(mOrd[1], 10);
-        const body = await readBody(req) || {};
-        const st = body.status === 'rezolvat' ? 'rezolvat' : (body.status === 'nou' ? 'nou' : null);
-        if (!st) return json({ error: 'Status invalid.' }, 400);
-        await env.DB.prepare('UPDATE client_orders SET status = ?1 WHERE id = ?2 AND tenant = ?3').bind(st, oid, tid).run();
-        await logAct(env, tid, session.sub, (st === 'rezolvat' ? 'A rezolvat' : 'A redeschis') + ' comanda client #' + oid, 'depozit');
         return json({ ok: true });
       }
       return json({ error: 'Not found' }, 404);
@@ -939,11 +904,11 @@ function landingPage() {
   <div class="split">
     <div>
       <h2>Un portal dedicat clienților tăi</h2>
-      <p>Clienții se autentifică și văd în timp real stocul produselor lor — cu detalii pe loturi și locații. Pot plasa comenzi care ajung direct la echipa depozitului.</p>
+      <p>Clienții se autentifică și văd în timp real stocul produselor lor — cu detalii pe loturi și locații. Transparent, mereu la zi.</p>
       <ul>
         <li>Vede doar produsele care îi sunt alocate</li>
         <li>Stoc disponibil, detalii pe loturi (FIFO) și locații</li>
-        <li>Plasează comenzi trimise instant în depozit</li>
+        <li>Informație în timp real, fără telefoane sau emailuri</li>
       </ul>
       <a class="btn btn-primary" href="/login">Intră în portalul de client</a>
     </div>
@@ -980,99 +945,48 @@ function clientPage(opts) {
   .who{display:flex;align-items:center;gap:12px;font-size:13px;color:#c3d0c8}
   .who a{color:#fff;text-decoration:none;background:#33474f;padding:6px 12px;border-radius:8px;font-weight:600}
   .who a:hover{background:#415862}
-  .tabs{display:flex;gap:6px;background:#eaf0e8;padding:5px;border-radius:12px;margin:16px auto 0;max-width:1060px;width:calc(100% - 32px)}
-  .tab{flex:1;text-align:center;padding:9px;border:0;background:transparent;border-radius:9px;font-weight:700;font-size:14px;cursor:pointer;color:#4b5a62}
-  .tab.active{background:#4a8f24;color:#fff;box-shadow:0 2px 7px rgba(74,143,36,.35)}
-  .wrap{max-width:1060px;margin:16px auto;padding:0 16px;display:grid;grid-template-columns:1fr 340px;gap:16px}
-  @media(max-width:820px){ .wrap{grid-template-columns:1fr} }
+  .wrap{max-width:820px;margin:18px auto;padding:0 16px}
   .card{background:#fff;border:1px solid #e2e7e5;border-radius:14px;padding:16px}
-  h2{font-size:16px;margin:0 0 12px}
-  input,textarea{width:100%;padding:10px 11px;border:1px solid #d5ddd6;border-radius:9px;font-size:15px;font-family:inherit}
-  input:focus,textarea:focus{outline:none;border-color:#4a8f24}
+  h2{font-size:16px;margin:0 0 4px}
+  .lead{color:#5c6b73;font-size:13.5px;margin:0 0 14px}
+  input{width:100%;padding:10px 11px;border:1px solid #d5ddd6;border-radius:9px;font-size:15px;font-family:inherit}
+  input:focus{outline:none;border-color:#4a8f24}
   .search{margin-bottom:12px}
   .prod{border:1px solid #e2e7e5;border-radius:11px;margin-bottom:10px;overflow:hidden}
   .prow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px}
   .pname{font-weight:700;font-size:15px}
   .pcod{font-size:12px;color:#8a979d}
-  .pqty{font-weight:800;font-size:18px;color:#3a721c;white-space:nowrap}
+  .pqty{font-weight:800;font-size:19px;color:#3a721c;white-space:nowrap}
   .pqty small{font-size:12px;color:#8a979d;font-weight:600}
-  .padd{background:#eaf0e8;color:#3a721c;border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap}
-  .padd:hover{background:#dbe7d6}
-  .padd:disabled{opacity:.5;cursor:default}
   .det{background:#f8faf8;border-top:1px solid #eef2ee;padding:0 14px;max-height:0;overflow:hidden;transition:max-height .2s,padding .2s}
   .det.open{max-height:360px;overflow:auto;padding:10px 14px}
   .drow{display:flex;justify-content:space-between;font-size:13px;color:#5c6b73;padding:5px 0;border-bottom:1px dashed #e2e7e5}
   .drow:last-child{border-bottom:0}
   .toggle{background:none;border:0;color:#4a8f24;font-size:12px;font-weight:700;cursor:pointer;padding:0}
-  .cart-item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eef2ee}
-  .cart-item .ci-name{flex:1;font-size:14px;font-weight:600}
-  .cart-item input{width:74px;text-align:center}
-  .cart-item .ci-rm{background:none;border:0;color:#dc2626;cursor:pointer;font-size:16px}
-  .main{width:100%;padding:12px;border:0;border-radius:10px;background:#4a8f24;color:#fff;font-weight:700;font-size:15px;cursor:pointer;margin-top:12px}
-  .main:hover{background:#3a721c} .main:disabled{opacity:.55;cursor:default}
   .empty{color:#8a979d;font-size:14px;text-align:center;padding:20px 0}
-  .ord{border:1px solid #e2e7e5;border-radius:11px;padding:12px 14px;margin-bottom:10px}
-  .ord-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-  .badge{font-size:11px;font-weight:800;padding:3px 10px;border-radius:20px}
-  .b-nou{background:#fef3c7;color:#92600a} .b-rez{background:#dcfce7;color:#166534}
-  .ord-items{font-size:13px;color:#5c6b73}
-  .status{font-size:13px;margin-top:8px;min-height:18px}
-  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1e2b34;color:#fff;padding:11px 20px;border-radius:11px;font-weight:600;box-shadow:0 6px 22px rgba(0,0,0,.28);opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
-  .hidden{display:none}
 </style></head><body>
 <header>
   <div class="brand"><span class="logo">📦</span><span>${firm}<small>Portal client · Warehouse Organizer</small></span></div>
   <div class="who"><span>👤 ${cid}</span><a href="#" id="logout">Ieși</a></div>
 </header>
-<div class="tabs">
-  <button class="tab active" data-t="stoc" type="button">📦 Stoc produse</button>
-  <button class="tab" data-t="comenzi" type="button">🧾 Comenzile mele</button>
-</div>
 
-<div id="viewStoc" class="wrap">
+<div class="wrap">
   <div class="card">
-    <h2>Stocul produselor tale</h2>
+    <h2>📦 Stocul produselor tale</h2>
+    <p class="lead">Vezi în timp real disponibilul produselor alocate ție. Apasă pe „detalii" pentru loturi și locații.</p>
     <input class="search" id="search" placeholder="🔎 Caută produs…">
     <div id="stockList"><p class="empty">Se încarcă…</p></div>
   </div>
-  <div class="card" style="align-self:start;position:sticky;top:12px">
-    <h2>🛒 Comanda ta</h2>
-    <div id="cart"><p class="empty">Adaugă produse din stoc.</p></div>
-    <textarea id="note" rows="2" placeholder="Observații (opțional)…" style="margin-top:10px"></textarea>
-    <button class="main" id="send" disabled>Trimite comanda</button>
-    <div class="status" id="orderStatus"></div>
-  </div>
 </div>
-
-<div id="viewComenzi" class="wrap hidden">
-  <div class="card" style="grid-column:1/-1">
-    <h2>Comenzile mele</h2>
-    <div id="ordersList"><p class="empty">Se încarcă…</p></div>
-  </div>
-</div>
-<div class="toast" id="toast"></div>
 
 <script>
   var $=function(id){return document.getElementById(id);};
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-  var STOCK=[], CART={};
+  var STOCK=[];
   // 401 -> inapoi la pagina publica
   var _f=window.fetch.bind(window);
   window.fetch=function(){return _f.apply(null,arguments).then(function(r){ if(r.status===401) location.href='/'; return r;});};
 
-  function toast(m){ var t=$('toast'); t.textContent=m; t.style.opacity='1'; clearTimeout(t._h); t._h=setTimeout(function(){t.style.opacity='0';},1900); }
-  function fmtDate(ts){ if(!ts) return ''; var d=new Date(ts); return d.toLocaleDateString('ro-RO')+' '+d.toLocaleTimeString('ro-RO',{hour:'2-digit',minute:'2-digit'}); }
-
-  // ---- tabs ----
-  [].forEach.call(document.querySelectorAll('.tab'),function(b){ b.addEventListener('click',function(){
-    [].forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.remove('active');}); b.classList.add('active');
-    var t=b.getAttribute('data-t');
-    $('viewStoc').classList.toggle('hidden',t!=='stoc');
-    $('viewComenzi').classList.toggle('hidden',t!=='comenzi');
-    if(t==='comenzi') loadOrders();
-  });});
-
-  // ---- stoc ----
   function loadStock(){
     fetch('/api/client/stock').then(function(r){return r.json();}).then(function(d){
       STOCK=(d&&d.products)||[]; renderStock();
@@ -1083,7 +997,7 @@ function clientPage(opts) {
     var list=STOCK.filter(function(p){ return !q || p.produs.toLowerCase().indexOf(q)>=0 || (p.cod||'').toLowerCase().indexOf(q)>=0; });
     if(!list.length){ $('stockList').innerHTML='<p class="empty">'+(STOCK.length?'Niciun produs găsit.':'Nu ai încă produse alocate. Contactează depozitul.')+'</p>'; return; }
     var html='';
-    list.forEach(function(p,idx){
+    list.forEach(function(p){
       var i=STOCK.indexOf(p);
       var batches=(p.batches||[]).map(function(b){
         return '<div class="drow"><span>📍 '+esc(b.code)+(b.data?' · lot '+esc(b.data):'')+'</span><span>'+b.cant+' buc</span></div>';
@@ -1092,63 +1006,15 @@ function clientPage(opts) {
         +'<div class="prow">'
           +'<div><div class="pname">'+esc(p.produs)+'</div>'+(p.cod?'<div class="pcod">cod: '+esc(p.cod)+'</div>':'')
             +' <button class="toggle" data-tg="'+i+'">detalii pe loturi ▾</button></div>'
-          +'<div style="display:flex;align-items:center;gap:12px">'
-            +'<div class="pqty">'+p.total+' <small>buc</small></div>'
-            +'<button class="padd" data-add="'+i+'"'+(p.total>0?'':' disabled')+'>+ comandă</button>'
-          +'</div>'
+          +'<div class="pqty">'+p.total+' <small>buc</small></div>'
         +'</div>'
         +'<div class="det" id="det'+i+'">'+batches+'</div>'
       +'</div>';
     });
     $('stockList').innerHTML=html;
-    [].forEach.call($('stockList').querySelectorAll('[data-add]'),function(b){ b.addEventListener('click',function(){ addToCart(STOCK[+b.getAttribute('data-add')]); }); });
     [].forEach.call($('stockList').querySelectorAll('[data-tg]'),function(b){ b.addEventListener('click',function(){ var d=$('det'+b.getAttribute('data-tg')); d.classList.toggle('open'); b.textContent=d.classList.contains('open')?'ascunde loturile ▴':'detalii pe loturi ▾'; }); });
   }
   $('search').addEventListener('input',renderStock);
-
-  // ---- cos ----
-  function addToCart(p){ if(!p) return; var k=p.produs.toLowerCase(); if(!CART[k]) CART[k]={prod:p.produs,qty:1,max:p.total}; else CART[k].qty++; renderCart(); toast('Adăugat: '+p.produs); }
-  function renderCart(){
-    var keys=Object.keys(CART);
-    if(!keys.length){ $('cart').innerHTML='<p class="empty">Adaugă produse din stoc.</p>'; $('send').disabled=true; return; }
-    var html='';
-    keys.forEach(function(k){ var c=CART[k];
-      html+='<div class="cart-item"><span class="ci-name">'+esc(c.prod)+'</span>'
-        +'<input type="number" min="1" value="'+c.qty+'" data-q="'+esc(k)+'">'
-        +'<button class="ci-rm" data-rm="'+esc(k)+'" title="Scoate">✕</button></div>';
-    });
-    $('cart').innerHTML=html; $('send').disabled=false;
-    [].forEach.call($('cart').querySelectorAll('[data-q]'),function(inp){ inp.addEventListener('input',function(){ var k=inp.getAttribute('data-q'); var v=Math.max(1,Math.round(+inp.value||1)); CART[k].qty=v; }); });
-    [].forEach.call($('cart').querySelectorAll('[data-rm]'),function(b){ b.addEventListener('click',function(){ delete CART[b.getAttribute('data-rm')]; renderCart(); }); });
-  }
-  $('send').addEventListener('click',function(){
-    var items=Object.keys(CART).map(function(k){return {prod:CART[k].prod,qty:CART[k].qty};});
-    if(!items.length) return;
-    $('send').disabled=true; $('orderStatus').textContent='Se trimite…';
-    fetch('/api/client/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items,note:$('note').value})})
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
-        if(res.ok){ CART={}; $('note').value=''; renderCart(); $('orderStatus').textContent=''; toast('✓ Comanda a fost trimisă!'); loadOrders(); }
-        else { $('orderStatus').style.color='#dc2626'; $('orderStatus').textContent=(res.d&&res.d.error)||'Eroare.'; $('send').disabled=false; }
-      }).catch(function(){ $('orderStatus').textContent='Conexiune eșuată.'; $('send').disabled=false; });
-  });
-
-  // ---- comenzile mele ----
-  function loadOrders(){
-    fetch('/api/client/orders').then(function(r){return r.json();}).then(function(d){
-      var orders=(d&&d.orders)||[];
-      if(!orders.length){ $('ordersList').innerHTML='<p class="empty">Nu ai încă nicio comandă.</p>'; return; }
-      $('ordersList').innerHTML=orders.map(function(o){
-        var badge=o.status==='rezolvat'?'<span class="badge b-rez">✓ Rezolvată</span>':'<span class="badge b-nou">● Nouă</span>';
-        var items=(o.items||[]).map(function(it){return esc(it.prod)+' × '+it.qty;}).join(', ');
-        return '<div class="ord"><div class="ord-head"><b>Comanda #'+o.id+'</b>'+badge+'</div>'
-          +'<div class="ord-items">'+items+'</div>'
-          +(o.note?'<div class="ord-items" style="margin-top:4px;font-style:italic">„'+esc(o.note)+'”</div>':'')
-          +'<div style="font-size:12px;color:#8a979d;margin-top:6px">'+fmtDate(o.created_at)+'</div></div>';
-      }).join('');
-    }).catch(function(){ $('ordersList').innerHTML='<p class="empty">Eroare la încărcare.</p>'; });
-  }
-
   $('logout').addEventListener('click',function(e){ e.preventDefault(); fetch('/api/logout',{method:'POST'}).then(function(){location.href='/';}).catch(function(){location.href='/';}); });
 
   loadStock();
