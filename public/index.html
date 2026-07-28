@@ -645,6 +645,7 @@
       <h2>Generează & acțiuni</h2>
       <label class="perlvl-toggle"><input type="checkbox" id="pickAll"> Include toate comenzile în listă</label>
       <button class="main" id="pickGen" style="margin-top:10px">Generează lista de cules</button>
+      <button class="main" id="pickWalkBtn" style="margin-top:8px;background:#1e2b34">📟 Culegere cu scanerul (Zebra)</button>
       <button class="main alt" id="pickPrint" style="margin-top:8px">🖨️ Printează lista</button>
       <button class="main" id="pickConfirm" style="margin-top:8px;background:#16a34a">✓ Confirmă ridicarea (scade din stoc)</button>
       <p class="hint" style="margin-top:8px">La confirmare, cantitățile culese se scad din inventar. Fără confirmare, stocul rămâne neatins.</p>
@@ -729,6 +730,30 @@
   <video id="scanVideo" playsinline style="width:min(92vw,480px);max-height:64vh;border-radius:14px;background:#000;object-fit:cover"></video>
   <div id="scanMsg" style="color:#cbd5e1;font-size:14px;margin-top:10px;text-align:center;max-width:480px"></div>
   <button id="scanClose" class="main" style="margin-top:14px;max-width:200px;background:#334155">Închide</button>
+</div>
+
+<!-- Culegere cu scanerul (Zebra): pas cu pas, scanezi locatia ca sa confirmi -->
+<div id="pickWalkModal" style="display:none;position:fixed;inset:0;background:#0f1a22;z-index:1200;flex-direction:column;color:#fff;padding:18px;text-align:center">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <div id="pwProgress" style="font-size:15px;font-weight:700;color:#9fb4a3"></div>
+    <button id="pwExit" style="background:#33474f;color:#fff;border:0;border-radius:9px;padding:8px 14px;font-weight:700;cursor:pointer">✕ Ieși</button>
+  </div>
+  <div id="pwBody" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">
+    <div style="color:#9fb4a3;font-size:15px;letter-spacing:.5px;text-transform:uppercase">Mergi la locația</div>
+    <div id="pwLoc" style="font-size:clamp(46px,13vw,110px);font-weight:800;line-height:1;letter-spacing:1px;color:#6cb33f"></div>
+    <div id="pwProd" style="font-size:clamp(18px,3.5vw,26px);font-weight:700;margin-top:8px"></div>
+    <div id="pwMeta" style="color:#c3d0c8;font-size:15px"></div>
+    <div id="pwQtyBox" style="margin-top:14px;background:#16242d;border-radius:14px;padding:14px 26px">
+      <div style="color:#9fb4a3;font-size:14px">De cules</div>
+      <div id="pwQty" style="font-size:clamp(40px,10vw,72px);font-weight:800;color:#fff;line-height:1.05"></div>
+    </div>
+    <div id="pwHint" style="margin-top:16px;font-size:16px;color:#9fb4a3">📟 Scanează eticheta locației cu scanerul Zebra…</div>
+    <div id="pwWarn" style="margin-top:10px;font-size:16px;font-weight:700;color:#f87171;min-height:22px"></div>
+  </div>
+  <div id="pwFooter" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+    <button id="pwManual" style="background:#4a8f24;color:#fff;border:0;border-radius:11px;padding:13px 20px;font-weight:800;font-size:16px;cursor:pointer">✓ Am cules (manual)</button>
+    <button id="pwSkip" style="background:#33474f;color:#fff;border:0;border-radius:11px;padding:13px 20px;font-weight:700;font-size:16px;cursor:pointer">⏭ Sari peste</button>
+  </div>
 </div>
 
 <!-- Modal QR de logare automata (scanabil cu Zebra) -->
@@ -3939,6 +3964,8 @@ function scanToast(msg){
 }
 function onHardwareScan(raw){
   const code=parseScanCode(raw); if(!code) return;
+  // daca e activa culegerea cu scanerul, scanarea confirma locatia curenta
+  if(window.__pickWalk && window.__pickWalk.active){ pickWalkScan(code); return; }
   scanToast('📟 Scanat: '+code);
   const vp=$('viewPick');
   if(vp && !vp.hidden) pickScanResult(raw); else goToLoc(raw);
@@ -4139,6 +4166,99 @@ function printPicking(){
   const w=window.open('','_blank'); if(!w){ alert('Permite ferestrele pop-up pentru a printa.'); return; }
   w.document.open(); w.document.write(html); w.document.close();
 }
+// ---------- CULEGERE CU SCANERUL (Zebra), pas cu pas ----------
+window.__pickWalk = { active:false, lines:[], idx:0 };
+function startPickWalk(){
+  // asigura o lista generata
+  if(!lastPicks || !lastPicks.picks.length){ genPicking(); }
+  if(!lastPicks || !lastPicks.picks.length){ $('pickStatus').textContent='Adaugă produse și generează lista înainte de culegere.'; return; }
+  window.__pickWalk = { active:true, lines: lastPicks.picks.map(p=>({...p, done:false})), idx:0 };
+  $('pickWalkModal').style.display='flex';
+  $('pwFooter').style.display='flex'; $('pwQtyBox').style.display=''; { const fb=$('pwFinishBtns'); if(fb) fb.remove(); }
+  renderPickWalk();
+}
+function renderPickWalk(){
+  const w=window.__pickWalk; if(!w.active) return;
+  const total=w.lines.length;
+  // sari peste liniile deja facute
+  while(w.idx<total && w.lines[w.idx].done) w.idx++;
+  if(w.idx>=total){ return finishPickWalk(); }
+  const p=w.lines[w.idx];
+  const doneCount=w.lines.filter(l=>l.done).length;
+  $('pwProgress').textContent='Pas '+(w.idx+1)+' / '+total+' · '+doneCount+' culese';
+  $('pwLoc').textContent=p.code;
+  $('pwProd').textContent=p.produs;
+  $('pwMeta').textContent=(p.cod?('cod '+p.cod):'')+(p.data?(p.cod?' · ':'')+'lot '+p.data:'');
+  $('pwQty').textContent=p.take+' buc';
+  $('pwHint').textContent='📟 Scanează eticheta locației '+p.code+' cu scanerul Zebra…';
+  $('pwWarn').textContent='';
+}
+function pickWalkScan(code){
+  const w=window.__pickWalk; if(!w.active) return;
+  const cur=w.lines[w.idx]; if(!cur) return;
+  const norm=s=>String(s||'').trim().toUpperCase();
+  if(norm(code)===norm(cur.code)){
+    pickWalkConfirmCurrent();
+  } else {
+    // locatie gresita
+    $('pwWarn').textContent='✗ Ai scanat '+code+' — mergi la '+cur.code;
+    try{ if(navigator.vibrate) navigator.vibrate(120); }catch(e){}
+  }
+}
+function pickWalkConfirmCurrent(){
+  const w=window.__pickWalk; if(!w.active) return;
+  const cur=w.lines[w.idx]; if(!cur) return;
+  cur.done=true;
+  scanToast('✓ '+cur.code+' · '+cur.produs+' × '+cur.take);
+  w.idx++;
+  renderPickWalk();
+}
+function skipPickWalk(){
+  const w=window.__pickWalk; if(!w.active) return;
+  w.idx++;
+  if(w.idx>=w.lines.length){ // daca am sarit ultima, verifica daca mai sunt nefacute inainte
+    const rem=w.lines.some(l=>!l.done); if(rem){ w.idx=w.lines.findIndex(l=>!l.done); }
+  }
+  renderPickWalk();
+}
+function finishPickWalk(){
+  const w=window.__pickWalk;
+  const total=w.lines.length, done=w.lines.filter(l=>l.done).length;
+  const allDone=done===total;
+  $('pwProgress').textContent='Gata · '+done+'/'+total;
+  $('pwLoc').textContent='✓';
+  $('pwProd').textContent=allDone?'Culegere completă!':'Culegere oprită';
+  $('pwMeta').textContent=done+' din '+total+' locații culese';
+  $('pwQtyBox').style.display='none'; $('pwFooter').style.display='none';
+  $('pwHint').innerHTML=allDone?'Confirmă ridicarea ca să scazi cantitățile din stoc.':'Ai sărit unele locații. Poți confirma doar ce ai cules.';
+  $('pwWarn').textContent='';
+  // inlocuieste butoanele cu confirma / inchide
+  const body=$('pwBody');
+  if(!$('pwFinishBtns')){
+    const div=document.createElement('div'); div.id='pwFinishBtns'; div.style.cssText='display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px';
+    div.innerHTML='<button id="pwConfirm" style="background:#16a34a;color:#fff;border:0;border-radius:11px;padding:13px 22px;font-weight:800;font-size:16px;cursor:pointer">✓ Confirmă ridicarea (scade stocul)</button>'
+      +'<button id="pwClose2" style="background:#33474f;color:#fff;border:0;border-radius:11px;padding:13px 22px;font-weight:700;font-size:16px;cursor:pointer">Închide fără scădere</button>';
+    body.appendChild(div);
+    $('pwConfirm').addEventListener('click', ()=>{
+      // scade din stoc DOAR liniile culese efectiv (nu si cele sarite)
+      const doneLines=window.__pickWalk.lines.filter(l=>l.done).map(l=>{ const o={...l}; delete o.done; return o; });
+      closePickWalk();
+      if(lastPicks) lastPicks.picks=doneLines;
+      confirmPicking();
+    });
+    $('pwClose2').addEventListener('click', closePickWalk);
+  }
+}
+function closePickWalk(){
+  window.__pickWalk={ active:false, lines:[], idx:0 };
+  $('pickWalkModal').style.display='none';
+  const fb=$('pwFinishBtns'); if(fb) fb.remove();
+}
+$('pickWalkBtn').addEventListener('click', startPickWalk);
+$('pwExit').addEventListener('click', closePickWalk);
+$('pwManual').addEventListener('click', pickWalkConfirmCurrent);
+$('pwSkip').addEventListener('click', skipPickWalk);
+
 $('pickAdd').addEventListener('click', ()=>{ addPickRow('',''); });
 $('pickRows').addEventListener('click', e=>{ if(e.target.classList.contains('pk-rm')){ const rows=$('pickRows').querySelectorAll('.pickrow'); if(rows.length>1) e.target.closest('.pickrow').remove(); else { e.target.closest('.pickrow').querySelector('.pk-prod').value=''; e.target.closest('.pickrow').querySelector('.pk-qty').value=''; } saveActiveFromUI(); } });
 $('pickRows').addEventListener('input', saveActiveFromUI);
