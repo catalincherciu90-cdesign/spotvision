@@ -21,9 +21,21 @@ CREATE TABLE IF NOT EXISTS users (
   id         TEXT PRIMARY KEY,
   pass_hash  TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  role       TEXT NOT NULL DEFAULT 'operator',  -- 'admin' | 'operator' | 'viewer'
+  role       TEXT NOT NULL DEFAULT 'operator',  -- 'admin' | 'operator' | 'viewer' | 'master' | 'client'
   tabs       TEXT,                               -- JSON cu taburile permise; NULL = toate
-  tenant     TEXT                                -- firma (gestiune) careia ii apartine
+  tenant     TEXT,                               -- firma (gestiune) careia ii apartine
+  products   TEXT                                -- (client) JSON cu produsele alocate ce le poate vedea
+);
+
+-- Comenzi plasate de clienti prin portal (ajung la echipa depozitului).
+CREATE TABLE IF NOT EXISTS client_orders (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant     TEXT NOT NULL,
+  client     TEXT NOT NULL,
+  items      TEXT NOT NULL,                      -- JSON: [{prod, qty}]
+  note       TEXT,
+  status     TEXT NOT NULL DEFAULT 'nou',        -- 'nou' | 'rezolvat'
+  created_at INTEGER NOT NULL
 );
 
 -- Gestiuni multiple (firme). Fiecare firma are datele ei, izolate.
