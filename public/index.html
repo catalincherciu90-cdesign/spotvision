@@ -731,6 +731,23 @@
   <button id="scanClose" class="main" style="margin-top:14px;max-width:200px;background:#334155">Închide</button>
 </div>
 
+<!-- Modal QR de logare automata (scanabil cu Zebra) -->
+<div id="qrLoginModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:1100;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:22px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+    <h2 style="margin:0 0 4px;font-size:18px">QR de logare automată</h2>
+    <p class="hint" style="margin:0 0 14px">Scanează cu terminalul <b>Zebra</b> (cameră) pentru a intra automat în cont — fără id și parolă.</p>
+    <div id="qrLoginTarget" style="font-weight:700;margin-bottom:10px"></div>
+    <div id="qrLoginBox" style="display:flex;align-items:center;justify-content:center;min-height:200px">Se generează…</div>
+    <p class="hint" id="qrLoginHint" style="margin:12px 0 0;word-break:break-all"></p>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px">
+      <button class="main" id="qrLoginPrint" style="width:auto;padding:10px 16px">🖨️ Printează</button>
+      <button class="main ghost" id="qrLoginRotate" style="width:auto;padding:10px 16px">🔄 Regenerează</button>
+      <button class="main ghost" id="qrLoginClose" style="width:auto;padding:10px 16px">Închide</button>
+    </div>
+    <p class="hint" style="margin:14px 0 0;color:#b45309;background:#fffbeb;border-radius:8px;padding:8px 10px;font-size:12px">⚠️ Oricine scanează acest cod intră în cont. Tratează-l ca pe o parolă; dacă se pierde, apasă „Regenerează".</p>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
@@ -3760,6 +3777,44 @@ function qrSVG(text){
     return q.createSvgTag({cellSize:4,margin:2,scalable:true}); } }catch(_){}
   return '';
 }
+// ---------- QR de logare automata (scanabil cu Zebra) ----------
+let qrLoginId=null, qrLoginToken=null;
+function qrLoginURL(tok){ return location.origin+'/qr?t='+encodeURIComponent(tok); }
+async function showLoginQR(id){
+  qrLoginId=id; qrLoginToken=null;
+  $('qrLoginTarget').textContent='Cont: '+id;
+  $('qrLoginBox').innerHTML='Se generează…'; $('qrLoginHint').textContent='';
+  $('qrLoginModal').style.display='flex';
+  try{
+    const d=await (await fetch('/api/users/'+encodeURIComponent(id)+'/qr')).json();
+    if(d&&d.token) renderLoginQR(d.token); else $('qrLoginBox').textContent='Eroare la generare.';
+  }catch(e){ $('qrLoginBox').textContent='Eroare de conexiune.'; }
+}
+function renderLoginQR(tok){
+  qrLoginToken=tok; const url=qrLoginURL(tok); const svg=qrSVG(url);
+  $('qrLoginBox').innerHTML = svg ? '<div style="width:220px;height:220px">'+svg+'</div>' : 'QR indisponibil pe acest browser.';
+  $('qrLoginHint').textContent=url;
+}
+{ const c=$('qrLoginClose'); if(c) c.addEventListener('click',()=>{ $('qrLoginModal').style.display='none'; }); }
+{ const m=$('qrLoginModal'); if(m) m.addEventListener('click',e=>{ if(e.target===m) m.style.display='none'; }); }
+{ const r=$('qrLoginRotate'); if(r) r.addEventListener('click',async ()=>{
+  if(!qrLoginId) return;
+  if(!confirm('Regenerezi codul QR? Codul vechi nu va mai funcționa.')) return;
+  $('qrLoginBox').innerHTML='Se generează…';
+  try{ const d=await (await fetch('/api/users/'+encodeURIComponent(qrLoginId)+'/qr',{method:'POST'})).json(); if(d&&d.token) renderLoginQR(d.token); }catch(e){}
+}); }
+{ const pr=$('qrLoginPrint'); if(pr) pr.addEventListener('click',()=>{
+  if(!qrLoginToken) return;
+  const svg=qrSVG(qrLoginURL(qrLoginToken));
+  const w=window.open('','_blank'); if(!w){ alert('Permite ferestrele pop-up pentru printare.'); return; }
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>QR logare '+esc(qrLoginId)+'</title></head><body style="font-family:system-ui;text-align:center;padding:40px">'
+    +'<h2 style="margin:0 0 6px">Logare rapidă</h2>'
+    +'<div style="font-size:15px;color:#555;margin-bottom:4px">Cont: <b>'+esc(qrLoginId)+'</b></div>'
+    +'<div style="font-size:13px;color:#888;margin-bottom:18px">Scanează cu terminalul Zebra pentru a intra automat în cont</div>'
+    +'<div style="display:inline-block;width:320px;height:320px">'+svg+'</div>'
+    +'<'+'script>window.onload=function(){window.print();}<\/script></body></html>');
+  w.document.close();
+}); }
 function labelInner(d,opt){
   const logo=logoData?`<img class="lbl-logo" src="${logoData}" alt="">`:'';
   const title=opt.title?`<div class="lbl-title">${esc(opt.title)}</div>`:'';
@@ -4663,6 +4718,10 @@ initApp();
           actions.appendChild(tb);
         }
         if(isAdmin){
+          const qr = document.createElement('a');
+          qr.href='#'; qr.textContent='QR logare'; qr.style.cssText='color:#3a721c;text-decoration:none;font-size:13px;white-space:nowrap';
+          qr.addEventListener('click', ev=>{ ev.preventDefault(); showLoginQR(u.id); });
+          actions.appendChild(qr);
           const del = document.createElement('a');
           del.href='#'; del.textContent='șterge'; del.style.cssText='color:#dc2626;text-decoration:none;font-size:13px;white-space:nowrap';
           del.addEventListener('click', async ev=>{
@@ -4743,6 +4802,8 @@ initApp();
         const row=document.createElement('div'); row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 11px';
         row.innerHTML='<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">🔑 <b>'+esc(cl.id)+'</b> <span style="font-size:11px;color:#94a3b8">'+(cl.products||[]).length+' produse alocate</span></span>';
         const act=document.createElement('span'); act.style.cssText='display:flex;gap:12px;white-space:nowrap';
+        const qr=document.createElement('a'); qr.href='#'; qr.textContent='QR logare'; qr.style.cssText='color:#3a721c;text-decoration:none;font-size:13px';
+        qr.addEventListener('click',e=>{ e.preventDefault(); showLoginQR(cl.id); });
         const edit=document.createElement('a'); edit.href='#'; edit.textContent='produse'; edit.style.cssText='color:#3a721c;text-decoration:none;font-size:13px';
         const del=document.createElement('a'); del.href='#'; del.textContent='șterge'; del.style.cssText='color:#dc2626;text-decoration:none;font-size:13px';
         const ed=document.createElement('div'); ed.style.cssText='display:none;padding:10px 11px;border-top:1px solid #e2e8f0;background:#f8fafc';
@@ -4759,7 +4820,7 @@ initApp();
           if(r.ok){ ed.style.display='none'; loadClients(); }
         });
         del.addEventListener('click', async e=>{ e.preventDefault(); if(!confirm('Ștergi clientul „'+cl.id+'”?')) return; const r=await fetch('/api/clients/'+encodeURIComponent(cl.id),{method:'DELETE'}); if(r.ok) loadClients(); });
-        act.appendChild(edit); act.appendChild(del); row.appendChild(act); wrap.appendChild(row); wrap.appendChild(ed); box.appendChild(wrap);
+        act.appendChild(qr); act.appendChild(edit); act.appendChild(del); row.appendChild(act); wrap.appendChild(row); wrap.appendChild(ed); box.appendChild(wrap);
       });
     }catch(e){ box.innerHTML='<p class="sub" style="margin:0">Eroare la încărcare.</p>'; }
   }

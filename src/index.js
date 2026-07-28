@@ -267,6 +267,7 @@ let clientsReady = false;
 async function ensureClients(env) {
   if (clientsReady) return;
   try { await env.DB.prepare('ALTER TABLE users ADD COLUMN products TEXT').run(); } catch (e) { /* exista deja */ }
+  try { await env.DB.prepare('ALTER TABLE users ADD COLUMN login_token TEXT').run(); } catch (e) { /* exista deja */ }
   try { await env.DB.prepare("CREATE TABLE IF NOT EXISTS client_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant TEXT NOT NULL, client TEXT NOT NULL, items TEXT NOT NULL, note TEXT, status TEXT NOT NULL DEFAULT 'nou', created_at INTEGER NOT NULL)").run(); } catch (e) {}
   clientsReady = true;
 }
@@ -405,6 +406,27 @@ export default {
       return json({ ok: true }, 200, { 'Set-Cookie': clearCookie() });
     }
 
+    // ---------- logare automata prin QR (scanabil cu Zebra) ----------
+    // QR-ul contine un link /qr?t=<token>; deschis pe dispozitiv -> seteaza sesiunea si intra.
+    if (p === '/qr' && method === 'GET') {
+      if (tooMany(`qr:${ip}`, 40, 60000)) return new Response('Prea multe încercări. Revino în câteva minute.', { status: 429 });
+      await ensureClients(env);
+      const t = url.searchParams.get('t') || '';
+      let user = null;
+      if (/^[a-f0-9]{24,64}$/.test(t)) {
+        user = await env.DB.prepare('SELECT id, tenant FROM users WHERE login_token = ?1').bind(t).first();
+      }
+      if (!user) {
+        // token invalid/expirat -> pagina de autentificare normala
+        return new Response(null, { status: 302, headers: { Location: '/login' } });
+      }
+      const tid2 = user.tenant || 'default';
+      const token = await signJWT({ sub: user.id, t: tid2, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }, await getAuthSecret(env));
+      await logAct(env, tid2, user.id, 'S-a autentificat prin QR');
+      await touchPresence(env, tid2, user.id);
+      return new Response(null, { status: 302, headers: { Location: '/', 'Set-Cookie': sessionCookie(token) } });
+    }
+
     // ---------- de aici incolo: totul cere sesiune ----------
     const session = await getSession(req, env);
     const myRole = session ? await getRole(env, session.sub) : null;
@@ -507,6 +529,25 @@ export default {
       await logAct(env, tid, session.sub, 'A schimbat taburile pentru „' + target + '”');
       return json({ ok: true, tabs: parseTabs(store) });
     }
+    // token de logare prin QR pentru un utilizator (get/genereaza sau rotate)
+    const mQr = p.match(/^\/api\/users\/(.+)\/qr$/);
+    if (mQr && (method === 'GET' || method === 'POST')) {
+      if (!session) return json({ error: 'Neautentificat.' }, 401);
+      if (!adminish) return json({ error: 'Doar administratorii pot genera QR de logare.' }, 403);
+      const target = decodeURIComponent(mQr[1]);
+      if (await getUserTenant(env, target) !== tid) return json({ error: 'Utilizator din altă firmă.' }, 403);
+      await ensureClients(env);
+      const row = await env.DB.prepare('SELECT login_token FROM users WHERE id = ?1 AND tenant = ?2').bind(target, tid).first();
+      let tok = row && row.login_token;
+      const rotate = method === 'POST';
+      if (!tok || rotate) {
+        tok = toHex(crypto.getRandomValues(new Uint8Array(24)));
+        await env.DB.prepare('UPDATE users SET login_token = ?1 WHERE id = ?2 AND tenant = ?3').bind(tok, target, tid).run();
+        if (rotate) await logAct(env, tid, session.sub, 'A regenerat QR-ul de logare pentru „' + target + '”', 'platforma');
+      }
+      return json({ ok: true, id: target, token: tok });
+    }
+
     const mUser = p.match(/^\/api\/users\/(.+)$/);
     if (mUser && method === 'DELETE') {
       if (!session) return json({ error: 'Neautentificat.' }, 401);
