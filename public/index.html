@@ -361,7 +361,8 @@
         <p class="hint" style="margin-top:0;margin-bottom:12px">Un rând pentru fiecare raft. Nume, câte niveluri și câți paleți pe nivel.</p>
         <div id="racks"></div>
         <button class="addr" id="addRack">➕ Adaugă raft</button>
-        <button class="main ghost" id="btnRackCfg" style="margin-top:12px">📂 Încarcă config rafturi (Excel)</button>
+        <button class="main" id="btnPlanImport" style="margin-top:12px;background:#1e2b34">📋 Importă plan (din schiță)</button>
+        <button class="main ghost" id="btnRackCfg" style="margin-top:6px">📂 Încarcă config rafturi (Excel)</button>
         <button class="main ghost" id="btnRackCfgModel" style="margin-top:6px">Descarcă model config</button>
         <input type="file" id="fileRackCfg" accept=".xlsx,.xls" hidden>
         <p class="hint" id="rackCfgStatus" style="margin-top:6px">Excel cu o coloană pentru numele raftului + coloanele <b>Nivele</b> și <b>Rand</b>.</p>
@@ -770,6 +771,21 @@
       <button class="main ghost" id="qrLoginClose" style="width:auto;padding:10px 16px">Închide</button>
     </div>
     <p class="hint" style="margin:14px 0 0;color:#b45309;background:#fffbeb;border-radius:8px;padding:8px 10px;font-size:12px">⚠️ Oricine scanează acest cod intră în cont. Tratează-l ca pe o parolă; dacă se pierde, apasă „Regenerează".</p>
+  </div>
+</div>
+
+<!-- Import plan depozit (din schita): o linie per raft -> Nume = paleti x niveluri -->
+<div id="planModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:1100;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;max-width:560px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.4);max-height:92vh;overflow:auto">
+    <h2 style="margin:0 0 4px;font-size:18px">📋 Importă planul depozitului</h2>
+    <p class="hint" style="margin:0 0 12px">O linie pentru fiecare raft: <b>Nume = paleți × niveluri</b>. „Paleți" = câți paleți încap pe un nivel (suma posturilor). Corectează numerele dacă am citit greșit o căsuță. Liniile care încep cu <b>#</b> sunt ignorate.</p>
+    <textarea id="planText" rows="16" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px solid #d5ddd6;border-radius:9px;padding:10px;line-height:1.5"></textarea>
+    <label class="perlvl-toggle" style="margin-top:10px"><input type="checkbox" id="planReplace" checked> Înlocuiește rafturile existente</label>
+    <div id="planErr" class="status" style="color:#dc2626;min-height:18px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px">
+      <button class="main ghost" id="planCancel" style="width:auto;padding:10px 16px">Anulează</button>
+      <button class="main" id="planDo" style="width:auto;padding:10px 18px">✓ Creează rafturile</button>
+    </div>
   </div>
 </div>
 
@@ -4537,6 +4553,54 @@ function importExcel(file){
 $('btnSave').addEventListener('click', exportExcel);
 $('btnLoad').addEventListener('click', ()=>$('fileXlsx').click());
 $('fileXlsx').addEventListener('change', e=>{ if(e.target.files[0]) importExcel(e.target.files[0]); e.target.value=''; });
+
+// --- Import plan depozit (din schita) ---
+const DEFAULT_PLAN=[
+  '# Planul tau (planul 2, cel incadrat). Format:  Nume = paleti/nivel x niveluri',
+  '# „paleti/nivel" = suma posturilor de pe un raft (X/stalp nu se numara).',
+  '# Estimari din poza — verifica fiecare numar cu schita si corecteaza.',
+  '',
+  'A01 = 63 x 3    # raft pe peretele de sus (cu 2 stalpi pe mijloc)',
+  'B01 = 20 x 3    # stanga, raft 1 - fata A',
+  'B02 = 20 x 3    # stanga, raft 1 - fata B',
+  'C01 = 20 x 3    # stanga, raft 2 - fata A',
+  'C02 = 20 x 3    # stanga, raft 2 - fata B',
+  'D01 = 19 x 3    # jos-stanga',
+  'E01 = 33 x 3    # dreapta, raft A - fata A (II III/3)',
+  'E02 = 33 x 3    # dreapta, raft A - fata B',
+  'F01 = 33 x 3    # dreapta, raft B - fata A (II III/3)',
+  'F02 = 33 x 3    # dreapta, raft B - fata B',
+  'G01 = 35 x 3    # jos-dreapta'
+].join('\n');
+function parsePlanLine(raw){
+  const s=String(raw).replace(/#.*/,'').trim(); if(!s) return null;
+  const m=s.match(/^(.+?)[\s=:,]+(\d+)\s*[x×*,\s]\s*(\d+)\s*$/i);
+  if(!m) return {error:raw};
+  const name=m[1].trim(), pallets=+m[2], levels=+m[3];
+  if(!name || pallets<1 || levels<1) return {error:raw};
+  return {name, pallets, levels};
+}
+function openPlanModal(){ if(!$('planText').value.trim()) $('planText').value=DEFAULT_PLAN; $('planErr').textContent=''; $('planModal').style.display='flex'; }
+function closePlanModal(){ $('planModal').style.display='none'; }
+function doPlanImport(){
+  if(window.__readonly){ $('planErr').textContent='Cont de vizualizare — nu poți modifica.'; return; }
+  const lines=$('planText').value.split('\n'); const racks=[]; const bad=[];
+  lines.forEach(l=>{ const r=parsePlanLine(l); if(!r) return; if(r.error) bad.push(r.error); else racks.push(r); });
+  if(bad.length){ $('planErr').textContent='Linii neînțelese: '+bad.slice(0,3).join(' | ')+(bad.length>3?' …':''); return; }
+  if(!racks.length){ $('planErr').textContent='Niciun raft valid. Folosește: Nume = paleți x niveluri'; return; }
+  const names=racks.map(r=>r.name.toLowerCase()); if(new Set(names).size!==names.length){ $('planErr').textContent='Nume de raft duplicat — fă-le unice.'; return; }
+  if($('planReplace').checked){ $('racks').innerHTML=''; for(const k in dimStore) delete dimStore[k]; }
+  racks.forEach(r=>addRackRaw(r.name, r.levels, r.pallets));
+  refresh(); loadDims($('dimRack').value); pushConfig();
+  closePlanModal();
+  const totPos=racks.reduce((a,r)=>a+r.pallets*r.levels,0);
+  $('rackCfgStatus').textContent='✓ Plan importat: '+racks.length+' rafturi · '+totPos.toLocaleString('ro-RO')+' poziții. Vezi harta în „Schemă locații".';
+}
+$('btnPlanImport').addEventListener('click', openPlanModal);
+$('planCancel').addEventListener('click', closePlanModal);
+$('planModal').addEventListener('click', e=>{ if(e.target===$('planModal')) closePlanModal(); });
+$('planDo').addEventListener('click', doPlanImport);
+
 $('btnLogo').addEventListener('click', ()=>$('fileLogo').click());
 $('fileLogo').addEventListener('change', e=>{ if(e.target.files[0]) loadLogoFile(e.target.files[0]); e.target.value=''; });
 $('btnLogoRemove').addEventListener('click', ()=>setLogo(''));
